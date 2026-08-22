@@ -28,6 +28,17 @@ if let outputPath = DesignPreview.parse(CommandLine.arguments) {
 // 入力欄で ⌘C/⌘V が効くかを実物で確かめる（--check-menu）。
 // メニューバーに出ないアプリは、メニューを自分で作らないと編集のキーが届かない。
 // 直したつもりで終わらせないための入口。
+// 設定画面の見た目を絵にする（--render-settings <出力先.png> [--pane general]）
+if let outputPath = SettingsPreview.parse(CommandLine.arguments) {
+    exit(SettingsPreview.run(outputPath: outputPath,
+                             dark: !CommandLine.arguments.contains("--light")))
+}
+
+// 「設定を探す」の行き先が実物と合っているかを確かめる（--check-settings-index）
+if CommandLine.arguments.contains("--check-settings-index") {
+    exit(SettingsIndexCheck.run())
+}
+
 if CommandLine.arguments.contains("--check-menu") {
     exit(EditMenu.selfTest())
 }

@@ -36,7 +36,11 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
 
     private var window: SettingsWindow?
     /// タブを外から選ぶために持っておく（棚の「＋」→「アプリのキー」）
-    private weak var tabView: NSTabView?
+    private weak var sidebar: SettingsSidebar?
+    /// 画面ごとの中身。一度作ったら使い回す（作り直すと入力中の字が消える）
+    private var paneViews: [SettingsPane: NSView] = [:]
+    private weak var paneHost: NSView?
+    private var currentPane: SettingsPane?
     /// キーの重なりを知らせる赤い文字。
     /// ⚠️ 1つではなく全部持つ。キーを決められる画面が2つ（ショートカット／アプリのキー）あり、
     /// 片方にしか出さないと、見ていない方のタブで重ねたときに何も言わないことになる。
@@ -82,11 +86,12 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     // MARK: - 開閉
 
     /// タブを指定して開く（棚の「＋」から「アプリのキー」へ直接連れていくため）
-    func show(selecting tabTitle: String) {
+    /// 外から画面を指して開く。
+    /// ⚠️ 文字列で受けない。前は "アプリのキー" と書いており、名前を変えた瞬間に
+    /// **黙って何も起きない**状態になる。列挙で受ければ組み立てのときに見つかる
+    func show(selecting pane: SettingsPane) {
         show()
-        guard let tabView,
-              let index = tabView.tabViewItems.firstIndex(where: { $0.label == tabTitle }) else { return }
-        tabView.selectTabViewItem(at: index)
+        sidebar?.select(pane)
     }
 
     func show() {
@@ -132,57 +137,182 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private static let contentWidth: CGFloat = 620
     private static let contentHeight: CGFloat = 540
 
+    /// 左右の余白。見出し・説明・行の名前・ボタンを、すべてこの位置から始める
+    /// （揃えないと「文字の始まりがバラバラ」に見える）
+    private static let gutter: CGFloat = 20
+    /// 行の名前の欄。ここを固定すると、右のキーの枠も一直線に並ぶ
+    /// （実測：一番長い「画面の文字を読み取る」で121pt）
+    private static let labelColumn: CGFloat = 140
+    /// 説明文を折り返す幅。
+    /// ⚠️ 折り返す幅を渡さない説明文は「1行で全部描ける幅」を要求し、**窓ごと横に広がる**。
+    /// 2026-08-19 実測：ショートカットの説明1行が設定窓を 620 → 1013pt に広げていた。
+    private static let captionWidth: CGFloat = contentWidth - gutter * 2 - 16
+
     private func buildWindow() -> SettingsWindow {
         let w = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0,
+                                width: SettingsSidebar.width + SettingsController.contentWidth,
+                                // 見出し棒に食われるぶんを足して、中身の高さ（540）を確保する
+                                height: SettingsController.contentHeight + 38),
+            // ⚠️ `.fullSizeContentView` を足すのが横メニューの肝。
+            // これが無いと、横メニューが灰色の見出し棒の下で切られて**貼り付けた板**に見える。
+            // 上まで通すと、閉じるボタンの後ろまですりガラスが続く（システム設定と同じ）
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        w.title = "テモトの設定"
         w.delegate = self
         w.isReleasedWhenClosed = false
-        // ⚠️ 見出しの棒を透かして、下の地色と地続きに見せる。
-        // 灰色の帯で上を区切ると、検索窓・メモの2つ（枠なし・すりガラス）と並べたときに
-        // ここだけ古い作りに見え、作者の言う「一つ一つが別アプリみたい」に戻る。
         w.titlebarAppearsTransparent = true
-        // 閉じるボタンだけでなく、手が覚えている esc と ⌘W でも閉じられるようにする
+        // 中身の側の見出し棒に、今いる画面の名前が出る（横メニューの上には出ない）。
+        // ⚠️ これは NSSplitViewItem(sidebarWithViewController:) を使ったときだけの働き。
+        // 自前で横に並べると、名前は窓の真ん中＝横メニューの上に出てしまう
+        w.title = SettingsPane.allCases[0].title
+        // 中身をスクロールしたときだけ細い線が出る。止まっているときは線を引かない
+        w.titlebarSeparatorStyle = .automatic
         w.onDismiss = { [weak self] reason in self?.close(reason: reason) }
 
-        let tabs = NSTabView(frame: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight))
-        tabView = tabs
-        // ⚠️ 既定は中身を灰色の箱で囲う（`tabViewBorderType = .bezel`）。
-        // 箱の中に箱が入って見えるうえ、後ろの地色を塗り潰すので枠を外す。
-        tabs.tabViewBorderType = .none
-        tabs.autoresizingMask = [.width, .height]
-        tabs.addTabViewItem(tab("一般", view: buildGeneralTab()))
-        tabs.addTabViewItem(tab("ショートカット", view: buildShortcutTab()))
-        tabs.addTabViewItem(tab("アプリのキー", view: buildAppShortcutTab()))
-        tabs.addTabViewItem(tab("使う機能", view: buildFeatureTab()))
-        tabs.addTabViewItem(tab("出すアプリ", view: buildAppTab()))
-        tabs.addTabViewItem(tab("コピー履歴", view: buildClipboardTab()))
-        tabs.addTabViewItem(tab("ファイル検索", view: buildFileSearchTab()))
+        let bar = SettingsSidebar(frame: NSRect(x: 0, y: 0,
+                                                width: SettingsSidebar.width,
+                                                height: SettingsController.contentHeight))
+        bar.onSelect = { [weak self] pane, reveal in self?.showPane(pane, revealing: reveal) }
+        sidebar = bar
+        let barVC = NSViewController()
+        barVC.view = bar
 
-        // 地にすりガラスを敷く。
-        // ⚠️ ここだけ BackdropView を使わないのは、設定は**枠のある普通の窓**で、
-        // 角丸も縁も macOS が描くため（自前で描くと角が二重になる）。
-        // 材質が `.windowBackground` なのは、腰を据えて読む画面だから
-        // （呼び出してすぐ消える検索窓の `.popover` より、地に落ち着きがある）。
-        let background = NSVisualEffectView(frame: tabs.frame)
-        background.material = .windowBackground
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.autoresizesSubviews = true
-        background.addSubview(tabs)
-        w.contentView = background
+        let host = NSVisualEffectView(frame: NSRect(x: 0, y: 0,
+                                                    width: SettingsController.contentWidth,
+                                                    height: SettingsController.contentHeight))
+        host.material = .windowBackground
+        host.blendingMode = .behindWindow
+        host.state = .followsWindowActiveState
+
+        // ⚠️ 中身を入れる枠。ここが**押し返す壁**になる。
+        // 画面を制約で直に貼ると、中身が窓より大きいとき Auto Layout は窓のほうを広げる
+        // （2026-08-14、出すアプリの説明文1行で 831→886 に広がった）。
+        // 枠だけを制約で留め、画面は昔ながらの frame + autoresizingMask で入れると、
+        // 中身の望みは窓まで伝わらない。はみ出すぶんは `scrollable(_:)` がスクロールで受ける
+        let clip = NSView()
+        clip.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(clip)
+        NSLayoutConstraint.activate([
+            clip.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor),
+            clip.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            clip.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            clip.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+        ])
+        paneHost = clip
+        let hostVC = NSViewController()
+        hostVC.view = host
+
+        let split = NSSplitViewController()
+        let barItem = NSSplitViewItem(sidebarWithViewController: barVC)
+        // 幅を動かせないようにする。中身の側は既定の横幅（620）で字の折り返しを決めているので、
+        // 横メニューを広げられると、説明文だけが先に折り返して見た目が崩れる
+        barItem.minimumThickness = SettingsSidebar.width
+        barItem.maximumThickness = SettingsSidebar.width
+        barItem.canCollapse = false
+        split.addSplitViewItem(barItem)
+        split.addSplitViewItem(NSSplitViewItem(viewController: hostVC))
+        w.contentViewController = split
+        // ⚠️ `contentViewController` を入れると、窓は**中の view の大きさに合わせて縮む**。
+        // contentRect に書いた高さは無視されるので、ここで言い直す。
+        // これを抜かすと、見出し棒に食われた 32 のぶんだけ中身が足りず、下が切れる
+        let size = NSSize(width: SettingsSidebar.width + SettingsController.contentWidth,
+                          height: SettingsController.contentHeight + 38)
+        w.setContentSize(size)
+        // ⚠️ 大きさを錠で留める。中身が窓より大きいと Auto Layout は窓のほうを広げるので、
+        // 画面を切り替えるたびに窓が跳ねる（設定の窓は手で戻せないので、一度伸びたら戻らない）。
+        // はみ出す中身は `scrollable(_:)` で包んでスクロールさせる。
+        // 破れていないかは `Temoto --check-settings-index` が7画面ぶん測って確かめる
+        w.contentMinSize = size
+        w.contentMaxSize = size
+
+        showPane(SettingsPane.allCases[0])
         return w
     }
 
-    private func tab(_ label: String, view: NSView) -> NSTabViewItem {
-        let item = NSTabViewItem(identifier: label)
-        item.label = label
-        item.view = view
-        return item
+    /// 画面を1つ出す。中身は作り置きして使い回す
+    private func showPane(_ pane: SettingsPane, revealing title: String? = nil) {
+        guard let host = paneHost else { return }
+        // ⚠️ 同じ画面でも、探して当たった設定が指定されていれば素通りしない。
+        // 「使う機能」を開いたまま別の設定を探したとき、そこまで送り届けるため
+        guard currentPane != pane || title != nil else { return }
+        let samePane = (currentPane == pane)
+        currentPane = pane
+        window?.title = pane.title
+
+        let view = paneViews[pane] ?? build(pane)
+        paneViews[pane] = view
+
+        // 同じ画面のままなら貼り直さない（貼り直すと入力中の字と、いま見ている位置が飛ぶ）
+        if samePane, view.superview === host {
+            if let title { DispatchQueue.main.async { [weak self] in self?.reveal(title, in: view) } }
+            return
+        }
+
+        host.subviews.forEach { $0.removeFromSuperview() }
+        // ⚠️ 制約で貼らない（上の「押し返す壁」の説明を参照）。
+        // 枠のほうが見出し棒ぶんを避けて置かれているので、ここは枠いっぱいでよい
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame = host.bounds
+        view.autoresizingMask = [.width, .height]
+        host.addSubview(view)
+
+        // 探して当たった設定なら、そこまでスクロールして見せる。
+        // ⚠️ 画面を出しただけでは足りない。「合言葉の自動展開」は画面のいちばん下にあり、
+        // 出しただけでは見えず、結局「無い」と思われる（2026-08-23 の入口そのもの）。
+        // ⚠️ 並べ終わってから測る必要があるので、次の回に回す
+        guard let title else { return }
+        DispatchQueue.main.async { [weak self] in self?.reveal(title, in: view) }
+    }
+
+    /// 画面の中から、その名前の行を探して見える位置まで送る。
+    ///
+    /// ⚠️ `scrollToVisible` は使わない。あれは「見えさえすればよい」ので、
+    /// 下にある設定は**画面の下端に貼り付いた状態**で止まり、下に続く説明文が切れる
+    /// （2026-08-14 に実際そうなった）。少し上に置いて、前後ごと読める形にする。
+    private func reveal(_ title: String, in view: NSView) {
+        guard let target = SettingsController.find(title, in: view),
+              let scroll = target.enclosingScrollView,
+              let document = scroll.documentView else { return }
+        let clip = scroll.contentView
+        let rect = target.convert(target.bounds, to: document)
+        // 上に見出しぶんの余白を残す。行きすぎないよう、中身の下端で止める
+        let limit = max(0, document.bounds.height - clip.bounds.height)
+        let y = min(max(0, rect.minY - 40), limit)
+        clip.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    private static func find(_ title: String, in view: NSView) -> NSView? {
+        if let field = view as? NSTextField, field.stringValue == title { return view }
+        if let button = view as? NSButton, button.title == title { return view }
+        for child in view.subviews {
+            if let found = find(title, in: child) { return found }
+        }
+        return nil
+    }
+
+    /// 画面ごとの中身を組み立てる。
+    /// ⚠️ `default:` を書かない。書くと、画面を足したときに**中身の無い画面**が黙って開く
+    /// （`LauncherItem.entry()` で実際にやった失敗。既定値に落ちる書き方は必ず後で刺さる）
+    /// 絵にするとき用。探している最中の姿を作る（`--render-settings --query …`）
+    func previewSearch(_ text: String) { sidebar?.preview(query: text) }
+
+    /// 検査用に、画面を1つ組み立てて返す（`--check-settings-index`）
+    func paneView(for pane: SettingsPane) -> NSView { build(pane) }
+
+    private func build(_ pane: SettingsPane) -> NSView {
+        switch pane {
+        case .general: return buildGeneralTab()
+        case .shortcuts: return buildShortcutTab()
+        case .appKeys: return buildAppShortcutTab()
+        case .features: return buildFeatureTab()
+        case .apps: return buildAppTab()
+        case .clipboard: return buildClipboardTab()
+        case .fileSearch: return buildFileSearchTab()
+        }
     }
 
     // MARK: - ショートカット
@@ -191,8 +321,11 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight))
 
         let footerHeight: CGFloat = 60
+        // ⚠️ 上に余白を足さない。タブの帯の下がそのまま中身の上端になる。
+        // （以前は高さから 40 引いていたので、使われない帯ができたうえ、
+        //   上端で行が途中から切れて「壊れている」ように見えていた）
         let scroll = NSScrollView(frame: NSRect(x: 0, y: footerHeight, width: container.bounds.width,
-                                                height: container.bounds.height - footerHeight - 40))
+                                                height: container.bounds.height - footerHeight))
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
@@ -201,10 +334,11 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: SettingsController.gutter,
+                                        bottom: 16, right: SettingsController.gutter)
 
-        stack.addArrangedSubview(heading("開くもの"))
+        addSection("開くもの", to: stack, first: true)
         // この4つは「割り当てなし」を許さない（無くすと開く手段が消える）ので、
         // set に nil が来ることはない。来ても何もしない。
         stack.addArrangedSubview(shortcutRow("検索を開く",
@@ -220,8 +354,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             get: { [store] in store.settings.noteShortcut },
             set: { [store] value in if let value { store.settings.noteShortcut = value } }))
 
-        stack.addArrangedSubview(spacer(10))
-        stack.addArrangedSubview(heading("ウィンドウを動かす"))
+        addSection("ウィンドウを動かす", to: stack)
         // 割り当ての無い配置も並べる。⌫ で消せて、押せば付けられる。
         for layout in WindowLayout.allCases {
             stack.addArrangedSubview(shortcutRow(
@@ -237,8 +370,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             ))
         }
 
-        stack.addArrangedSubview(spacer(10))
-        stack.addArrangedSubview(heading("画面をまたぐ"))
+        addSection("画面をまたぐ", to: stack)
         for step in [1, -1] {
             stack.addArrangedSubview(shortcutRow(
                 step > 0 ? "次の画面へ移す" : "前の画面へ移す",
@@ -253,15 +385,10 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             ))
         }
 
-        stack.addArrangedSubview(spacer(10))
-        stack.addArrangedSubview(heading("文字を変換"))
-        let convertNote = NSTextField(labelWithString:
-            "どのアプリでも、選んでいる文字をその場で置き換えます（コピー→変換→貼り付けを1押しで）。")
-        convertNote.font = .systemFont(ofSize: 11)
-        convertNote.textColor = .secondaryLabelColor
-        convertNote.lineBreakMode = .byWordWrapping
-        convertNote.maximumNumberOfLines = 2
-        stack.addArrangedSubview(convertNote)
+        addSection("文字を変換", to: stack)
+        stack.addArrangedSubview(caption(
+            "どのアプリでも、選んでいる文字をその場で置き換えます（コピー→変換→貼り付けを1押しで）。", lines: 2))
+        stack.addArrangedSubview(spacer(4))
         for transform in TextTransform.allCases {
             stack.addArrangedSubview(shortcutRow(
                 "\(transform.title)に変換",
@@ -276,53 +403,19 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             ))
         }
 
-        stack.addArrangedSubview(spacer(10))
-        stack.addArrangedSubview(heading("貼り付け"))
-        let pasteNote = NSTextField(labelWithString:
-            "コピー中の文字から色や書式を落として、そのまま貼り付けます（Webやメールからのコピーに）。")
-        pasteNote.font = .systemFont(ofSize: 11)
-        pasteNote.textColor = .secondaryLabelColor
-        pasteNote.lineBreakMode = .byWordWrapping
-        pasteNote.maximumNumberOfLines = 2
-        stack.addArrangedSubview(pasteNote)
+        addSection("貼り付け", to: stack)
+        stack.addArrangedSubview(caption(
+            "コピー中の文字から色や書式を落として、そのまま貼り付けます（Webやメールからのコピーに）。", lines: 2))
+        stack.addArrangedSubview(spacer(4))
         stack.addArrangedSubview(shortcutRow(
             "書式なしで貼り付け",
             allowsEmpty: true,
             get: { [store] in store.settings.pastePlainShortcut },
             set: { [store] value in store.settings.pastePlainShortcut = value }
         ))
-        // 合言葉の自動展開。⚠️ キーの流れを見る仕組みなので、何を見て何を見ないかを明記する
-        let expandToggle = NSButton(checkboxWithTitle: "合言葉の自動展開（どのアプリでも、打った瞬間に本文へ置き換える）",
-                                    target: self, action: #selector(toggleExpandSnippets(_:)))
-        expandToggle.state = store.settings.expandSnippets ? .on : .off
-        stack.addArrangedSubview(expandToggle)
-        let expandNote = NSTextField(labelWithString:
-            "定型文の「読みがな」を英数で打つと、その場で本文に置き換わります（例: mailz）。"
-            + "打った文字はどこにも保存・送信しません。パスワード欄と日本語入力の変換中は動きません。"
-            + "アクセシビリティの許可が必要です。")
-        expandNote.font = .systemFont(ofSize: 11)
-        expandNote.textColor = .secondaryLabelColor
-        expandNote.lineBreakMode = .byWordWrapping
-        expandNote.maximumNumberOfLines = 3
-        stack.addArrangedSubview(expandNote)
-        stack.addArrangedSubview(spacer(8))
 
-        // 不具合の記録。⚠️ どこにも自動で送らないことを、ボタンのそばに書く
-        // （書かないと「勝手に送られているのでは」と思われる。通信ゼロが看板なので致命的）
-        let problemButton = NSButton(title: "問題を報告する…", target: self,
-                                     action: #selector(showProblems))
-        problemButton.bezelStyle = .rounded
-        stack.addArrangedSubview(problemButton)
-        let problemNote = NSTextField(labelWithString:
-            "うまくいかなかったことを手元に記録しています。中身を読んでから、"
-            + "コピーかファイルで渡せます。どこにも自動では送りません。")
-        problemNote.font = .systemFont(ofSize: 11)
-        problemNote.textColor = .secondaryLabelColor
-        problemNote.lineBreakMode = .byWordWrapping
-        problemNote.maximumNumberOfLines = 3
-        stack.addArrangedSubview(problemNote)
-        stack.addArrangedSubview(spacer(8))
-
+        // 見出しの無い迷子の行だったので、まとまりを与える
+        addSection("画面を読み取る", to: stack)
         stack.addArrangedSubview(shortcutRow(
             "画面の文字を読み取る",
             allowsEmpty: true,
@@ -330,7 +423,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             set: { [store] value in store.settings.captureTextShortcut = value }
         ))
 
-        let documentView = NSView()
+        let documentView = FlippedView()
         documentView.addSubview(stack)
         stack.translatesAutoresizingMaskIntoConstraints = false
         documentView.translatesAutoresizingMaskIntoConstraints = false
@@ -351,7 +444,8 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         help.textColor = .secondaryLabelColor
         help.lineBreakMode = .byWordWrapping
         help.maximumNumberOfLines = 2
-        help.frame = NSRect(x: 20, y: 30, width: container.bounds.width - 40, height: 30)
+        help.frame = NSRect(x: SettingsController.gutter, y: 30,
+                            width: container.bounds.width - SettingsController.gutter * 2, height: 30)
         help.autoresizingMask = [.width, .maxYMargin]
         container.addSubview(help)
 
@@ -359,14 +453,15 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         conflict.font = .systemFont(ofSize: 11, weight: .medium)
         conflict.textColor = .systemRed
         conflict.lineBreakMode = .byTruncatingTail
-        conflict.frame = NSRect(x: 20, y: 10, width: container.bounds.width - 160, height: 16)
+        conflict.frame = NSRect(x: SettingsController.gutter, y: 10,
+                                width: container.bounds.width - 160 - SettingsController.gutter, height: 16)
         conflict.autoresizingMask = [.width, .maxYMargin]
         container.addSubview(conflict)
         conflictLabels.append(conflict)
 
         let reset = NSButton(title: "はじめの設定に戻す", target: self, action: #selector(resetShortcuts))
         reset.bezelStyle = .rounded
-        reset.frame = NSRect(x: container.bounds.width - 160, y: 4, width: 145, height: 26)
+        reset.frame = NSRect(x: container.bounds.width - 145 - SettingsController.gutter, y: 4, width: 145, height: 26)
         reset.autoresizingMask = [.minXMargin, .maxYMargin]
         container.addSubview(reset)
 
@@ -387,10 +482,12 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
 
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 13)
-        label.alignment = .right
+        // ⚠️ 右寄せにしない。名前の長さがまちまちなので、右で揃えると
+        // 文字の始まりが1行ごとにずれて、目で追えなくなる（2026-08-19 作者の指摘）。
+        label.alignment = .left
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.widthAnchor.constraint(equalToConstant: 230).isActive = true
+        label.widthAnchor.constraint(equalToConstant: SettingsController.labelColumn).isActive = true
 
         let field = ShortcutField()
         field.translatesAutoresizingMaskIntoConstraints = false
@@ -521,6 +618,9 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         empty.textColor = .tertiaryLabelColor
         empty.lineBreakMode = .byWordWrapping
         empty.maximumNumberOfLines = 2
+        // ⚠️ これが無いと「1行に収まる幅」を自分の望みの大きさとして主張し、
+        // Auto Layout は**窓のほうを広げて**辻褄を合わせる（831→981 になっていた）
+        empty.preferredMaxLayoutWidth = SettingsController.captionWidth
         empty.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(empty)
         appShortcutEmptyLabel = empty
@@ -696,19 +796,10 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     // 「Raycastは消した・テモトも立ち上がらない」で何も呼び出せなくなる。
 
     private func buildGeneralTab() -> NSView {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight))
-
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-        ])
 
         stack.addArrangedSubview(heading("起動"))
 
@@ -766,8 +857,23 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         folder.bezelStyle = .rounded
         stack.addArrangedSubview(folder)
 
+        // 不具合の記録。⚠️ どこにも自動で送らないことを、ボタンのそばに書く
+        // （書かないと「勝手に送られているのでは」と思われる。通信ゼロが看板なので致命的）。
+        // ⚠️ ここは元は「ショートカット」画面の末尾にあった。キーの話ではないので一般へ移した
+        stack.addArrangedSubview(spacer(12))
+        stack.addArrangedSubview(divider())
+        stack.addArrangedSubview(spacer(8))
+        stack.addArrangedSubview(heading("うまくいかないとき"))
+        let problemButton = NSButton(title: "問題を報告する…", target: self,
+                                     action: #selector(showProblems))
+        problemButton.bezelStyle = .rounded
+        stack.addArrangedSubview(problemButton)
+        stack.addArrangedSubview(caption(
+            "うまくいかなかったことを手元に記録しています。中身を読んでから、"
+            + "コピーかファイルで渡せます。どこにも自動では送りません。"))
+
         refreshLoginItem()
-        return container
+        return scrollable(stack)
     }
 
     @objc private func openStoreFolder() {
@@ -814,19 +920,10 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     // MARK: - 使う機能
 
     private func buildFeatureTab() -> NSView {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight))
-
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-        ])
 
         stack.addArrangedSubview(heading("検索窓に出すもの"))
 
@@ -868,9 +965,27 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         note.textColor = .tertiaryLabelColor
         note.lineBreakMode = .byWordWrapping
         note.preferredMaxLayoutWidth = SettingsController.contentWidth - 50
+        // ⚠️ ここは元は「ショートカット」画面の、貼り付けと画面読み取りの間にあった。
+        // キーの割り当てに混ざっていたせいで**誰にも見つからない**設定になっていた
+        // （2026-08-23 作者「スニペット機能は実装されていますか？？」＝入っているのに気づけない）。
+        // 機能のオン・オフは機能の画面に置く。ショートカットはキーの割り当てだけにする
+        stack.addArrangedSubview(spacer(12))
+        stack.addArrangedSubview(divider())
+        stack.addArrangedSubview(spacer(8))
+        stack.addArrangedSubview(heading("合言葉の自動展開"))
+        let expandToggle = NSButton(checkboxWithTitle: "どのアプリでも、打った瞬間に本文へ置き換える",
+                                    target: self, action: #selector(toggleExpandSnippets(_:)))
+        expandToggle.state = store.settings.expandSnippets ? .on : .off
+        stack.addArrangedSubview(expandToggle)
+        stack.addArrangedSubview(caption(
+            "定型文の「読みがな」を英数で打つと、その場で本文に置き換わります（例: mailz）。"
+            + "打った文字はどこにも保存・送信しません。パスワード欄と日本語入力の変換中は動きません。"
+            + "アクセシビリティの許可が必要です。", lines: 4))
+        stack.addArrangedSubview(spacer(8))
+
         stack.addArrangedSubview(note)
 
-        return container
+        return scrollable(stack)
     }
 
     /// 一覧を今の設定どおりに作り直す。
@@ -1013,6 +1128,8 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         lead.textColor = .secondaryLabelColor
         lead.lineBreakMode = .byWordWrapping
         lead.maximumNumberOfLines = 2
+        // ⚠️ 折り返す幅を教えないと「1行に収まる幅（634）」を望んで窓を押し広げる
+        lead.preferredMaxLayoutWidth = SettingsController.captionWidth
         lead.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(lead)
 
@@ -1079,11 +1196,11 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         container.addSubview(rescan)
 
         // ボタンの意味を画面に書く（2026-07-31 作者「アプリを数え直すとは？？」）
-        let buttonsNote = NSTextField(labelWithString:
-            "自分で作ったアプリは「探すフォルダを追加…」で置き場所を足すと出てきます")
-        buttonsNote.font = .systemFont(ofSize: 11)
-        buttonsNote.textColor = .secondaryLabelColor
-        buttonsNote.lineBreakMode = .byTruncatingTail
+        // ⚠️ ボタンの右に置かない。3つのボタンと横一列に並べると、
+        // required な横並びが窓の幅より長くなり、窓そのものが横に伸びる
+        // （2026-08-19 実測：この行だけで 620 → 708pt）。ボタンの上の段に置く。
+        let buttonsNote = caption(
+            "自分で作ったアプリは「探すフォルダを追加…」で置き場所を足すと出てきます", lines: 2)
         buttonsNote.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(buttonsNote)
 
@@ -1102,7 +1219,11 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             scroll.topAnchor.constraint(equalTo: count.bottomAnchor, constant: 6),
             scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            scroll.bottomAnchor.constraint(equalTo: reset.topAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: buttonsNote.topAnchor, constant: -10),
+
+            buttonsNote.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+            buttonsNote.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -20),
+            buttonsNote.bottomAnchor.constraint(equalTo: reset.topAnchor, constant: -8),
 
             reset.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             reset.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
@@ -1110,9 +1231,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             rescan.centerYAnchor.constraint(equalTo: reset.centerYAnchor),
             addFolder.leadingAnchor.constraint(equalTo: rescan.trailingAnchor, constant: 10),
             addFolder.centerYAnchor.constraint(equalTo: reset.centerYAnchor),
-            buttonsNote.leadingAnchor.constraint(equalTo: rescan.trailingAnchor, constant: 12),
-            buttonsNote.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -20),
-            buttonsNote.centerYAnchor.constraint(equalTo: reset.centerYAnchor),
+            addFolder.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -20),
         ])
 
         reloadAppList()
@@ -1271,20 +1390,10 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private var bundlesView: NSTextView?
 
     private func buildClipboardTab() -> NSView {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight))
-
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 22),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
-        ])
 
         stack.addArrangedSubview(heading("どこまで残すか"))
 
@@ -1385,7 +1494,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         clear.bezelStyle = .rounded
         stack.addArrangedSubview(clear)
 
-        return container
+        return scrollable(stack)
     }
 
     @objc private func clearClipsTapped() {
@@ -1399,20 +1508,10 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private var fileFoldersView: NSTextView?
 
     private func buildFileSearchTab() -> NSView {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: SettingsController.contentWidth, height: SettingsController.contentHeight))
-
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 22),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
-        ])
 
         stack.addArrangedSubview(heading("どう探すか"))
 
@@ -1465,7 +1564,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         apply.bezelStyle = .rounded
         stack.addArrangedSubview(apply)
 
-        return container
+        return scrollable(stack)
     }
 
     @objc private func applyFileSearchSettings() {
@@ -1481,7 +1580,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             fileSearch.maxResults = min(max(n, 10), 500)
         }
         fileMaxResultsField?.stringValue = String(fileSearch.maxResults)
-        fileSearch.folders = SettingsLines.split(fileFoldersView?.string)
+        fileSearch.folders = SettingsLines.lines(keeping: fileSearch.folders, from: fileFoldersView?.string)
 
         guard fileSearch != store.settings.fileSearch else { return }
 
@@ -1603,8 +1702,8 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         if let box = readImageTextBox { clipboard.readImageText = (box.state == .on) }
         if let box = captureFilesBox { clipboard.captureFiles = (box.state == .on) }
 
-        clipboard.excludedPatterns = SettingsLines.split(patternsView?.string)
-        clipboard.excludedBundleIDs = SettingsLines.split(bundlesView?.string)
+        clipboard.excludedPatterns = SettingsLines.lines(keeping: clipboard.excludedPatterns, from: patternsView?.string)
+        clipboard.excludedBundleIDs = SettingsLines.lines(keeping: clipboard.excludedBundleIDs, from: bundlesView?.string)
 
         // 中身が変わっていないなら書かない（閉じるたびに保存しにいかない）
         guard clipboard != store.settings.clipboard else { return }
@@ -1619,10 +1718,74 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate 
 
     // MARK: - 部品
 
+    /// 縦に伸びる中身を、はみ出したときだけスクロールできる形に包む。
+    ///
+    /// ⚠️ 2026-08-14 に「使う機能」へ合言葉の自動展開を移したら、窓の高さを超えて
+    /// **下が切れた**（絵に撮って気づいた）。設定は今後も増えるので、
+    /// 決め打ちの高さに収める作りをやめる。
+    private func scrollable(_ stack: NSStackView) -> NSView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        // ⚠️ 素の NSView にしない。AppKit の座標は「左下が原点」なので、
+        // 中身が窓より短いとき**下に沈んで**上に大きな空きができる（実際そうなった）
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        scroll.documentView = document
+        NSLayoutConstraint.activate([
+            document.widthAnchor.constraint(equalTo: scroll.widthAnchor),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -24),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24),
+        ])
+        return scroll
+    }
+
     private func heading(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 13, weight: .semibold)
         return label
+    }
+
+    /// 説明文。
+    /// ⚠️ preferredMaxLayoutWidth を必ず渡すこと（渡さないと窓が横に伸びる）。
+    /// 押し合いに負ける側にもしておく（窓の幅より説明の都合を優先させない）。
+    private func caption(_ text: String, lines: Int = 3) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = lines
+        label.preferredMaxLayoutWidth = SettingsController.captionWidth
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    /// まとまりの境目に引く細い線
+    private func divider() -> NSView {
+        let line = NSBox()
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: SettingsController.captionWidth).isActive = true
+        return line
+    }
+
+    /// 「線 → 間 → 見出し → 間」を毎回同じ間合いで積む。
+    /// 手で spacer を置くと、まとまりごとに間隔がずれて雑に見える。
+    private func addSection(_ title: String, to stack: NSStackView, first: Bool = false) {
+        if first {
+            stack.addArrangedSubview(heading(title))
+        } else {
+            stack.addArrangedSubview(spacer(12))
+            stack.addArrangedSubview(divider())
+            stack.addArrangedSubview(spacer(8))
+            stack.addArrangedSubview(heading(title))
+        }
+        stack.addArrangedSubview(spacer(2))
     }
 
     private func spacer(_ height: CGFloat) -> NSView {

@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launcher.onOpenSettings = { [weak self] in self?.openSettings() }
         launcher.onShowProblems = { ErrorReporter.showReport() }
         // 棚の「＋」＝アプリを足しに行く（タブまで指定して連れていく）
-        launcher.onAddShelfApp = { [weak self] in self?.settingsUI.show(selecting: "アプリのキー") }
+        launcher.onAddShelfApp = { [weak self] in self?.settingsUI.show(selecting: .appKeys) }
 
         buildStatusItem()
         registerHotKeys()

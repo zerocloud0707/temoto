@@ -3786,6 +3786,7 @@ checkSnippetSearch()
 checkAppFolderScan()
 checkShelfKeys()
 checkShelfFocus()
+checkSettingsPanes()
 checkQuickOpen()
 checkShortcutInventory()
 checkCaptureShot()
@@ -5315,4 +5316,73 @@ if failures.isEmpty {
         print("  - \(f)")
     }
     exit(1)
+}
+
+
+// MARK: - 設定画面の横メニュー
+
+func checkSettingsPanes() {
+    section("設定の横メニュー")
+
+    // ── 画面そのもの
+    expect(SettingsPane.allCases.count == 7, "画面は7つ")
+    let titles = SettingsPane.allCases.map(\.title)
+    expect(Set(titles).count == titles.count, "画面の名前がかぶらない")
+    expect(titles.allSatisfy { !$0.isEmpty }, "名前の無い画面が無い")
+    let symbols = SettingsPane.allCases.map(\.symbolName)
+    expect(Set(symbols).count == symbols.count, "記号がかぶらない（見分けが付く）")
+    expect(symbols.allSatisfy { !$0.isEmpty }, "記号の無い画面が無い")
+
+    // ── 探せること
+    // ⚠️ 数を直に書かない。画面を足したら自動で対象になる
+    for pane in SettingsPane.allCases {
+        expect(SettingsSearch.items.contains { $0.pane == pane },
+               "「\(pane.title)」に探せる設定がある（探しても出てこない画面を作らない）")
+    }
+    expect(SettingsSearch.find("").isEmpty, "空欄なら何も絞らない")
+    expect(SettingsSearch.find("   ").isEmpty, "空白だけでも何も絞らない")
+
+    // 作者が実際に探しそうな言葉で当たるか
+    expect(SettingsSearch.find("スニペット").contains { $0.pane == .features },
+           "「スニペット」で使う機能に当たる")
+    expect(SettingsSearch.find("snippet").contains { $0.pane == .features },
+           "英語の「snippet」でも当たる")
+    expect(SettingsSearch.find("SNIPPET").contains { $0.pane == .features },
+           "大文字でも当たる")
+    expect(SettingsSearch.find("ログイン").contains { $0.pane == .general },
+           "「ログイン」で一般に当たる")
+    expect(SettingsSearch.find("パスワード").contains { $0.pane == .clipboard },
+           "「パスワード」でコピー履歴の除外に当たる")
+    expect(SettingsSearch.find("ホットキー").contains { $0.pane == .shortcuts },
+           "「ホットキー」でショートカットに当たる")
+    expect(SettingsSearch.find("ぬるぽ").isEmpty, "当たらない言葉では何も出ない")
+
+    // 空白で区切ったら絞り込み（AND）
+    let both = SettingsSearch.find("コピー 除外")
+    expect(both.allSatisfy { $0.pane == .clipboard }, "2語はどちらも満たすものだけ")
+    expect(SettingsSearch.find("スニペット ログイン").isEmpty,
+           "両方を満たすものが無ければ空（片方でも出す OR にしない）")
+
+    // 並びは横メニューの順のまま（打つたびに行が入れ替わらない）
+    let panes = SettingsSearch.panes(matching: "設定")
+    let order = SettingsPane.allCases
+    var last = -1
+    var ordered = true
+    for pane in panes {
+        guard let at = order.firstIndex(of: pane) else { ordered = false; break }
+        if at <= last { ordered = false; break }
+        last = at
+    }
+    expect(ordered, "当たった画面は横メニューの並び順で返る")
+
+    // ── 開いていない画面の設定を空で上書きしない（2026-08-14 の実害）
+    let keep = ["com.apple.Safari", "com.1password.1password"]
+    expect(SettingsLines.lines(keeping: keep, from: nil) == keep,
+           "画面がまだ無いなら、今の設定をそのまま残す")
+    expect(SettingsLines.lines(keeping: keep, from: "") == [],
+           "画面があって空にされたなら、空にする（利用者が消したのだから従う）")
+    expect(SettingsLines.lines(keeping: keep, from: "a\nb") == ["a", "b"],
+           "画面があるなら打った通りに読む")
+    expect(SettingsLines.lines(keeping: [], from: nil) == [],
+           "元が空でも壊れない")
 }

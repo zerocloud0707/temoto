@@ -167,6 +167,23 @@ public struct NoteSettings: Codable, Equatable, Sendable {
 /// 画面の部品はテストできない（実行ファイル側にあるので import できない）ので、
 /// 間違えると困る読み取りだけこちらに置いている。
 public enum SettingsLines {
+    /// 画面から一覧を読み直す。**画面がまだ無いなら、今の値をそのまま残す**。
+    ///
+    /// ⚠️ この規則が要るのは、設定画面を横メニューにしたとき（2026-08-14）に
+    /// 画面を**開いたときに初めて作る**ようにしたから。
+    /// それまでは7画面すべてを最初に作っていたので、入力欄は必ず在った。
+    /// `split(nil)` は空の配列を返すので、素直に書くと
+    /// 「一度も開いていない画面の設定が、閉じた瞬間に空で上書きされる」。
+    /// 実際にこの形で、除外アプリ・秘密の型・探しに行くフォルダが消える状態になっていた。
+    ///
+    /// - Parameters:
+    ///   - current: 今保存されている値（画面が無いときはこれを返す）
+    ///   - text: 画面の入力欄の中身。画面がまだ無いなら nil
+    public static func lines(keeping current: [String], from text: String?) -> [String] {
+        guard let text else { return current }
+        return split(text)
+    }
+
     public static func split(_ text: String?) -> [String] {
         (text ?? "")
             .split(separator: "\n", omittingEmptySubsequences: true)

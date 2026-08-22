@@ -122,6 +122,12 @@ trap cleanup_all EXIT INT TERM
 echo "▼ 動作確認" 1>&2
 swift run TemotoChecks 1>&2
 
+# 「設定を探す」の行き先が、実物の画面と合っているかを確かめる。
+# ⚠️ TemotoChecks では見られない（画面の組み立てに AppKit が要る）。
+# ここを抜かすと、探して出てきたのに開いた画面にその設定が無い、という外れ方をする
+echo "▼ 設定の探し先" 1>&2
+swift run Temoto --check-settings-index 1>&2
+
 echo "▼ ビルド（release）" 1>&2
 swift build -c release 1>&2
 
