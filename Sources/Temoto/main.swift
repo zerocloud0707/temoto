@@ -35,6 +35,11 @@ if let outputPath = SettingsPreview.parse(CommandLine.arguments) {
 }
 
 // 「設定を探す」の行き先が実物と合っているかを確かめる（--check-settings-index）
+// 横メニューの記号の見かけの大きさが揃っているかを測る（--check-settings-glyphs）
+if CommandLine.arguments.contains("--check-settings-glyphs") {
+    exit(SettingsGlyphCheck.run())
+}
+
 if CommandLine.arguments.contains("--check-settings-index") {
     exit(SettingsIndexCheck.run())
 }

@@ -34,6 +34,8 @@ final class SettingsSidebar: NSView {
     private var query: String = ""
 
     static let width: CGFloat = 208
+    /// タイルの一辺（記号の大きさの検査から引く）
+    static let tileSize: CGFloat = 20
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -111,14 +113,18 @@ final class SettingsSidebar: NSView {
             // 素直に上端へ置くと、閉じる・しまう・広げるの3つの丸に検索欄が重なる。
             // macOS 26 では横メニューを自前のすりガラスで包む（NSContainerConcentricGlassEffectView）ため、
             // 空ける量は版によって変わる。数値を決め打ちしない
-            search.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 6),
+            // ⚠️ 9。`.unified` の道具棒で safeAreaInsets.top が 44 になり、
+            // 板の上端から検索欄まで 44+9=53pt ＝ システム設定の実測と一致する
+            search.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 9),
             search.leadingAnchor.constraint(equalTo: glass.leadingAnchor, constant: 10),
             search.trailingAnchor.constraint(equalTo: glass.trailingAnchor, constant: -10),
 
-            scroll.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 8),
+            scroll.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 9),
             scroll.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: glass.bottomAnchor, constant: -8),
+            // ⚠️ 0。Apple は一覧の下端を板の下端とぴったり合わせる。
+            // -8 だと一覧が板の中に浮いて見える
+            scroll.bottomAnchor.constraint(equalTo: glass.bottomAnchor, constant: 0),
         ])
 
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
@@ -227,7 +233,7 @@ private final class SidebarRowView: NSTableCellView {
     /// タイルの一辺。字（13pt）の行に対して、大きすぎず記号が潰れない大きさ
     /// ⚠️ 行の高さ 32 に対して 20。上下に 6pt ずつ残って落ち着く。
     /// 22 だと 5pt しか残らず、行いっぱいに札が詰まって窮屈に見える
-    static let tile: CGFloat = 20
+    static let tile: CGFloat = SettingsSidebar.tileSize
 
     private let tileView = NSView()
     private let tileGradient = CAGradientLayer()
@@ -249,7 +255,8 @@ private final class SidebarRowView: NSTableCellView {
         // ⚠️ `.preferringHierarchical()` は色を足さない。同じ色の**濃さを段にして**
         // 絵の主役と脇役を分ける（歯車なら歯が濃く、中心が薄い）。
         // 平らな一色の記号は、大きさを変えても「線画」のままで奥行きが出ない
-        glyph.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        glyph.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: row.pane.glyphPointSize, weight: .medium)
             .applying(.preferringHierarchical())
         glyph.imageScaling = .scaleProportionallyDown
         glyph.translatesAutoresizingMaskIntoConstraints = false

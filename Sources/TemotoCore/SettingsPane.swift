@@ -52,22 +52,46 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     }
 
     /// 記号（SF Symbols の名前）。
+    ///
+    /// ⚠️ 行き先を設定する画面は、**その行き先と同じ記号を引く**（色も同じ）。
+    /// 書き写すと必ずいつかずれる。実際、私は一度コピー履歴だけ
+    /// `list.bullet.clipboard` に替えて、「ファイル検索は検索窓と完全一致・
+    /// コピー履歴だけ別の絵」という非対称を作った。色で作った対応関係を記号が裏切る。
+    /// 引いてくれば、ずれようがない。
+    ///
     /// ⚠️ macOS 14 に無い名前を書くと、絵が出ないまま静かに空欄になる。
-    /// 迷ったら古くからある名前を選ぶ（`sparkles` のような新顔は避ける）
+    /// `Temoto --check-settings-index` は**今動いている macOS でしか実在を見ない**ので、
+    /// 新しい名前は macOS 26 では素通りし、macOS 14 でだけ黙って消える。古い名前を選ぶこと
     public var symbolName: String {
+        if let mode { return mode.symbolName }
         switch self {
         case .general: return "gearshape"
         case .shortcuts: return "command"
         case .appKeys: return "keyboard"
-        // ⚠️ 「使う機能」は入切の画面なので、格子ではなく**スイッチ**。
-        // 「出すアプリ」はアプリが並ぶ画面なので格子。前は逆に近い当て方だった
+        // 入切の画面なので、格子ではなくスイッチ
         case .features: return "switch.2"
+        // アプリが並ぶ画面なので格子
         case .apps: return "square.grid.2x2"
-        // ⚠️ 「重ねた書類」ではなく「箇条書きのバインダー」。履歴＝並んだ一覧なので意味が合う
-        case .clipboard: return "list.bullet.clipboard"
-        // ⚠️ ただの虫めがねにしない。横メニューの上に「設定を探す」の欄があり、
-        // そこにも虫めがねが出る。同じ絵が2つ並ぶと、どちらが何か一瞬迷う
-        case .fileSearch: return "doc.text.magnifyingglass"
+        case .clipboard, .fileSearch: return ""   // 上の mode で引くので、ここには来ない
+        }
+    }
+
+    /// 記号を描く大きさ。
+    ///
+    /// ⚠️ 1つの pointSize では**揃わない**。SF Symbols は絵ごとに墨の量と形が違うので、
+    /// 同じ pointSize で描くと横長の keyboard は大きく、細い command は小さく見える
+    /// （実測: 1つの pointSize 12 だと墨の長辺が 10.6〜15.0pt ＝ 1.36倍のばらつき）。
+    /// 下の値は「タイル20ptに対し墨の長辺 11.5pt・面積 50pt²」を狙って絵ごとに 測った値。
+    /// ⚠️ 記号を替えたら必ず測り直す。ずれは `--check-settings-glyphs` が見張る
+    public var glyphPointSize: CGFloat {
+        switch self {
+        case .general: return 11.0      // gearshape
+        case .shortcuts: return 11.0    // command
+        case .appKeys: return 9.25      // keyboard（横に長いので一番小さい）
+        case .features: return 11.0     // switch.2
+        case .apps: return 11.0         // square.grid.2x2
+        case .clipboard: return 9.0     // doc.on.clipboard（2枚重ねで縦に長い）
+        case .fileSearch: return 10.75  // doc.text.magnifyingglass
         }
     }
 }

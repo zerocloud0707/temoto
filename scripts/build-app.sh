@@ -128,6 +128,11 @@ swift run TemotoChecks 1>&2
 echo "▼ 設定の探し先" 1>&2
 swift run Temoto --check-settings-index 1>&2
 
+# 横メニューの記号の見かけの大きさが揃っているか。
+# ⚠️ 落ちたら閾値ではなく SettingsPane.glyphPointSize のほうを直す
+echo "▼ 記号の見かけ" 1>&2
+swift run Temoto --check-settings-glyphs 1>&2
+
 echo "▼ ビルド（release）" 1>&2
 swift build -c release 1>&2
 

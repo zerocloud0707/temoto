@@ -37,6 +37,11 @@ enum Theme {
         /// ⚠️ macOS 26 の標準はカプセル型で、高さは Md=24（.sketch の実測: Mn16/Sm20/Md24/Lg28/XL36）。
         /// キーの札（KeyCap）はカプセルにしない＝キーはキーの形（角丸5）が正しい
         static let capsule: CGFloat = 12
+
+        /// まとまりを載せる面（カード）の角丸。
+        /// ⚠️ 窓の角丸（26）より小さく、部品の角丸（7）より大きい。
+        /// 窓 > 面 > 部品 の順に丸みが小さくなると、入れ子が自然に見える
+        static let card: CGFloat = 12
         /// 押せる部品の高さ（Apple の Md ボタンと同じ）
         static let controlHeight: CGFloat = 24
     }
@@ -120,6 +125,13 @@ enum Theme {
         static var backdropVeil: NSColor {
             adaptive(light: NSColor.white.withAlphaComponent(Contrast.Backdrop.veilLightAlpha),
                      dark: NSColor.black.withAlphaComponent(Contrast.Backdrop.veilDarkAlpha))
+        }
+
+        /// まとまりを載せる面（カード）の地。
+        /// ⚠️ 明は白・暗は**黒**を重ねる（Tone の規約とは逆。理由は Contrast.Card 参照）
+        static var cardFill: NSColor {
+            adaptive(light: NSColor.white.withAlphaComponent(Contrast.Card.lightWhiteAlpha),
+                     dark: NSColor.black.withAlphaComponent(Contrast.Card.darkBlackAlpha))
         }
 
         /// 仕切り線。
@@ -284,6 +296,79 @@ final class BackdropView: NSVisualEffectView {
                 wash.layer?.backgroundColor = NSColor.clear.cgColor
             }
             glint.layer?.backgroundColor = Theme.Palette.topGlint.cgColor
+        }
+    }
+}
+
+/// まとまりを載せる面。
+///
+/// ⚠️ 枠は描かない（`borderWidth = 0`）。形は塗りだけで作る。
+/// このアプリの決まりが禁じているのは「線で形を作ること」で、「面で形を作ること」ではない。
+/// 地がすりガラスになった今、線を引くと線だけが浮いて「紙に定規を当てた」ように見える。
+/// ⚠️ ここに `NSVisualEffectView` を使わない。地が既に `.popover` のガラスなので、
+/// ガラスの上にガラスを重ねると濁る（横メニューで実際に起きた二重ガラスと同じ）。
+final class CardView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = Theme.Radius.card
+        layer?.borderWidth = 0
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("使わない") }
+
+    override func updateLayer() {
+        super.updateLayer()
+        applyColors()
+    }
+
+    /// ⚠️ NSView では見た目が変わっても updateLayer() が呼ばれないことがある
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        // ⚠️ `.cgColor` は書いた瞬間の見た目で固まる。必ず今の見た目の下で解く
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.Palette.cardFill.cgColor
+        }
+    }
+}
+
+/// 文字を打つ場所を表す、わずかに沈んだ面。
+///
+/// ⚠️ `NSColor.textBackgroundColor` / `.controlBackgroundColor` を使わない。
+/// あれは**どの見た目でも不透明**（明1.000／暗0.118）で、すりガラスの上に置くと
+/// 真っ白（真っ黒）な箱が貼り付く。2026-08-23 に実際そうなった。
+/// ⚠️ かといって地を敷かないのも駄目。枠も地も無いと「どこが打てる場所か」の
+/// 手がかりが消える（2026-07-29「枠が消えた」と同じ状態）。
+/// ボタンと同じ 0.08 をごく薄く敷いて、面であることだけを示す。
+final class FieldWellView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = Theme.Radius.chip
+        layer?.masksToBounds = true
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("使わない") }
+
+    override func updateLayer() {
+        super.updateLayer()
+        applyColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.Palette.keyCapFill.cgColor
         }
     }
 }
@@ -815,7 +900,8 @@ final class ChipButton: NSButton {
     /// （2026-08-23、設定の15個のボタンをカプセルに替えたときに必要になった）
     override var intrinsicContentSize: NSSize {
         var size = super.intrinsicContentSize
-        size.width += 20
+        // 記号だけのカプセルは正方形でよい（左右の余白は制約側で決める）
+        size.width += title.isEmpty ? 0 : 20
         size.height = Theme.Radius.capsule * 2
         return size
     }
@@ -840,10 +926,15 @@ final class ChipButton: NSButton {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = (isHovering ? Theme.Palette.keyCapEdge : Theme.Palette.keyCapFill).cgColor
         }
-        attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: font ?? .systemFont(ofSize: 11.5),
-            .foregroundColor: NSColor.labelColor,
-        ])
+        // ⚠️ 記号だけのカプセル（title が空）では組み直さない。
+        // 空の attributedTitle を入れると imagePosition = .imageOnly と衝突してカプセルが潰れる
+        if !title.isEmpty {
+            attributedTitle = NSAttributedString(string: title, attributes: [
+                .font: font ?? .systemFont(ofSize: 11.5),
+                .foregroundColor: NSColor.labelColor,
+            ])
+        }
+        contentTintColor = .labelColor
     }
 }
 

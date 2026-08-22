@@ -84,6 +84,30 @@ public enum Contrast {
     ///
     /// 明るいときは黒を、暗いときは白を重ねる。数字はすべてここに集める
     /// （3か所に散らばった濃さは、必ずいつか食い違う）。
+    /// まとまりを載せる「面」（カード）の濃さ。
+    ///
+    /// ⚠️ これは Tone の規約（明＝黒を重ねる／暗＝白を重ねる）の**例外**。
+    /// カードは地より**明るく浮かせる**ものなので、明るい見た目では白を、
+    /// 暗い見た目では——白ではなく**黒**を重ねる。
+    /// 暗い側で白 0.07 を重ねると、地が明るくなって説明文の対比が 4.62→4.01 に落ち、
+    /// 4.5 を割る（2026-08-23 計算）。黒 0.10 なら 5.32 で余裕がある。
+    /// 「浮かせる」は明るさの向きではなく**地との差**で作る。
+    ///
+    /// ⚠️ 面で作る。線は1本も引かない（このアプリの決まり「枠で形を作らない」）。
+    /// 禁じているのは線で形を作ることで、面で形を作ることではない。
+    /// macOS 26 のシステム設定も、面の中に角丸の箱を置いて塊を作り、横線は引いていない。
+    public enum Card {
+        public static let lightWhiteAlpha = 0.55
+        public static let darkBlackAlpha = 0.10
+
+        /// 地の上にカードを重ねたあとの明るさ
+        public static func gray(on backdrop: Double, isDark: Bool) -> Double {
+            isDark
+                ? Contrast.composite(overlay: 0, alpha: darkBlackAlpha, on: backdrop)
+                : Contrast.composite(overlay: 1, alpha: lightWhiteAlpha, on: backdrop)
+        }
+    }
+
     public struct Tone: Sendable, Equatable {
         public let light: Double
         public let dark: Double

@@ -3787,6 +3787,7 @@ checkAppFolderScan()
 checkShelfKeys()
 checkShelfFocus()
 checkSettingsPanes()
+checkSettingsSurface()
 checkQuickOpen()
 checkShortcutInventory()
 checkCaptureShot()
@@ -5385,4 +5386,41 @@ func checkSettingsPanes() {
            "画面があるなら打った通りに読む")
     expect(SettingsLines.lines(keeping: [], from: nil) == [],
            "元が空でも壊れない")
+}
+
+
+// MARK: - 設定画面の地と面
+
+func checkSettingsSurface() {
+    section("設定画面の地と面")
+
+    // ── 仕切り線が「引いたつもりで見えていない」ことにならないか
+    // ⚠️ 2026-08-23 実測: `.separatorColor × α0.7` はすりガラスの中（vibrant）だと
+    // 最悪比 1.11 で、このアプリ自身が決めた下限 1.5 を割っていた
+    expect(Contrast.Tones.separatorLine.worstRatio >= Contrast.Threshold.visibleEdge,
+           "仕切り線は消えずに見分けが付く（\(String(format: "%.2f", Contrast.Tones.separatorLine.worstRatio)) ≧ \(Contrast.Threshold.visibleEdge)）")
+
+    // ── まとまりを載せる面の上でも、説明文が読めるか
+    // ⚠️ 面を重ねると地の明るさが変わる。文字の濃さだけ見ていても足りない
+    let places: [(Double, Bool, String)] = [
+        (Contrast.Backdrop.lightDarkest, false, "明るい見た目・いちばん暗い地"),
+        (Contrast.Backdrop.lightBrightest, false, "明るい見た目・いちばん明るい地"),
+        (Contrast.Backdrop.darkDarkest, true, "暗い見た目・いちばん暗い地"),
+        (Contrast.Backdrop.darkBrightest, true, "暗い見た目・いちばん明るい地"),
+    ]
+    for (backdrop, isDark, name) in places {
+        let card = Contrast.Card.gray(on: backdrop, isDark: isDark)
+        let text = Contrast.Tones.caption.gray(on: card, isDark: isDark)
+        let ratio = Contrast.ratio(text, card)
+        expect(ratio >= Contrast.Threshold.readableText,
+               "面の上でも説明文が読める（\(name)・\(String(format: "%.2f", ratio)) ≧ \(Contrast.Threshold.readableText)）")
+    }
+
+    // ⚠️ 暗い見た目で面に**白**を重ねると落ちることを、ここで示しておく。
+    // 「明るくすれば浮く」と思って白に変えたくなるが、地が明るくなるぶん
+    // 白い文字との差が縮む。浮かせるのは明るさの向きではなく**地との差**
+    let wrong = Contrast.composite(overlay: 1, alpha: 0.07, on: Contrast.Backdrop.darkBrightest)
+    let wrongText = Contrast.Tones.caption.gray(on: wrong, isDark: true)
+    expect(Contrast.ratio(wrongText, wrong) < Contrast.Threshold.readableText,
+           "暗い見た目で面に白を重ねると読めなくなる（だから黒を重ねている）")
 }
