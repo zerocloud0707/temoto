@@ -122,8 +122,15 @@ enum Theme {
                      dark: NSColor.black.withAlphaComponent(Contrast.Backdrop.veilDarkAlpha))
         }
 
-        /// 仕切り線。NSBox の既定よりも薄くする（濃いと窓が段ボール箱に見える）
-        static var separator: NSColor { .separatorColor.withAlphaComponent(0.7) }
+        /// 仕切り線。
+        ///
+        /// ⚠️ 前は `.separatorColor.withAlphaComponent(0.7)` だった。
+        /// すりガラスの中に置いた部品は外見が **vibrant** になり、そこでの `.separatorColor` は
+        /// 明 0.902 / 暗 0.137 に化ける。覆い込みの地（明0.61〜1.00／暗0.08〜0.40）に対して
+        /// 最悪 **1.11** ＝ このアプリ自身が決めた「線と分かる下限」`Threshold.visibleEdge = 1.5` を
+        /// 下回っていた（2026-08-23 実測）。**引いているつもりで見えていない線**だった。
+        /// 明暗どちらでも 1.5 を超える濃さに置き換える
+        static var separator: NSColor { tone(Contrast.Tones.separatorLine) }
 
         /// 主役でない文字（副題・キーの説明・状態）の色。
         ///
@@ -212,15 +219,25 @@ final class BackdropView: NSVisualEffectView {
         didSet { applyColors() }
     }
 
-    override init(frame frameRect: NSRect) {
+    /// 角丸と縁を自分で描くか。
+    ///
+    /// ⚠️ 検索窓・メモは**枠の無い浮く窓**なので、角も縁も自分で描く（true）。
+    /// 設定は**枠のある普通の窓**で、角丸も縁も macOS が描く。
+    /// そこで自分でも描くと角が二重になるので false にする。
+    /// ⚠️ 材質・覆い・上端の光は**どちらでも同じ**。ここを分けると窓ごとに質感がばらつき、
+    /// 作者の言う「一つ一つが別アプリみたい」に戻る（2026-08-23 に設定へも入れた理由）
+    private let framed: Bool
+
+    init(frame frameRect: NSRect, framed: Bool = true) {
+        self.framed = framed
         super.init(frame: frameRect)
         material = .popover
         blendingMode = .behindWindow
         state = .active
         wantsLayer = true
-        layer?.cornerRadius = Theme.Radius.window
+        layer?.cornerRadius = framed ? Theme.Radius.window : 0
         layer?.masksToBounds = true
-        layer?.borderWidth = 1
+        layer?.borderWidth = framed ? 1 : 0
 
         veil.frame = bounds
         veil.autoresizingMask = [.width, .height]
@@ -236,8 +253,9 @@ final class BackdropView: NSVisualEffectView {
 
         // 上端に1本だけ光を敷く（角の丸みの内側に収まるよう、左右を丸みぶん逃がす）
         glint.wantsLayer = true
-        glint.frame = NSRect(x: Theme.Radius.window, y: bounds.height - 1,
-                             width: max(bounds.width - Theme.Radius.window * 2, 0), height: 1)
+        let glintInset = framed ? Theme.Radius.window : 0
+        glint.frame = NSRect(x: glintInset, y: bounds.height - 1,
+                             width: max(bounds.width - glintInset * 2, 0), height: 1)
         glint.autoresizingMask = [.width, .minYMargin]
         addSubview(glint)
         applyColors()
@@ -254,7 +272,7 @@ final class BackdropView: NSVisualEffectView {
 
     private func applyColors() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.borderColor = (edgeColor ?? Theme.Palette.windowEdge).cgColor
+            if framed { layer?.borderColor = (edgeColor ?? Theme.Palette.windowEdge).cgColor }
             veil.layer?.backgroundColor = Theme.Palette.backdropVeil.cgColor
             // ⚠️ 濃さは「言われて初めて気づく」くらいに留める。
             // ここを上げると窓が色紙になり、行き先のタイルと喧嘩する（色は1か所に集める）
@@ -266,6 +284,24 @@ final class BackdropView: NSVisualEffectView {
                 wash.layer?.backgroundColor = NSColor.clear.cgColor
             }
             glint.layer?.backgroundColor = Theme.Palette.topGlint.cgColor
+        }
+    }
+}
+
+// MARK: - 文章の組み方
+
+extension Theme {
+    enum Text {
+        /// 日本語の説明文の行送り。
+        ///
+        /// ⚠️ AppKit の既定の行送りは欧文向けで、漢字かなが混ざると**行が詰まって**見える。
+        /// 2026-08-23 作者「おしゃれさが足りない」の一因。説明が2〜4行あるので効きが大きい。
+        /// ⚠️ 1.5 を超えると今度は行がばらけて「読みにくい」になる。1.35 が上限
+        static func paragraph(_ lineHeight: CGFloat = 1.35) -> NSParagraphStyle {
+            let style = NSMutableParagraphStyle()
+            style.lineHeightMultiple = lineHeight
+            style.lineBreakMode = .byWordWrapping
+            return style
         }
     }
 }
@@ -748,6 +784,12 @@ final class KindBadgeView: NSView {
 final class ChipButton: NSButton {
     private var isHovering = false
 
+    convenience init(title: String, target: AnyObject?, action: Selector) {
+        self.init(title: title)
+        self.target = target
+        self.action = action
+    }
+
     init(title: String) {
         super.init(frame: .zero)
         self.title = title
@@ -766,6 +808,16 @@ final class ChipButton: NSButton {
         super.sizeToFit()
         // カプセルは端が丸い分、文字の左右に余白が要る。高さは Apple の Md ボタンと同じ
         setFrameSize(NSSize(width: frame.width + 20, height: Theme.Radius.capsule * 2))
+    }
+
+    /// ⚠️ 位置を制約で決める場所（設定画面の縦並び）では `sizeToFit()` が呼ばれない。
+    /// ここを書かないと、カプセルが文字ぴったりに潰れて丸が欠ける
+    /// （2026-08-23、設定の15個のボタンをカプセルに替えたときに必要になった）
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += 20
+        size.height = Theme.Radius.capsule * 2
+        return size
     }
 
     override func updateTrackingAreas() {

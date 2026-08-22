@@ -138,6 +138,12 @@ public enum Contrast {
         /// ここだけは 4.5 を求めない
         public static let faint = Tone(light: 0.34, dark: 0.40)
 
+        /// 仕切り線。
+        /// ⚠️ 文字ではないので 4.5 は求めないが、**線と分かる程度には見えていること**
+        /// （`Threshold.visibleEdge = 1.5`）を要求する。
+        /// 0.14/0.16 だと最悪 1.32 で届かない。0.22/0.20 で最悪 1.55（2026-08-23 実測）
+        public static let separatorLine = Tone(light: 0.22, dark: 0.20)
+
         /// キーの札の枠。文字ではないので 4.5 は求めないが、
         /// **枠と分かる程度には見えていること**を要求する（見えない枠を描く意味はない）
         public static let keyCapEdge = Tone(light: 0.24, dark: 0.24)

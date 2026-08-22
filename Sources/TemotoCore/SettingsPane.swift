@@ -36,6 +36,21 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         }
     }
 
+    /// この画面が設定している「行き先」。行き先でない画面は nil。
+    ///
+    /// ⚠️ 色の規律（`ModeTint`）は「色が付くのは行き先だけ」。
+    /// 設定の横メニューでもこれを守る＝**行き先を設定する画面だけ、その行き先の色を着る**。
+    /// コピー履歴の画面は、コピー履歴のタイルと同じ青。見た目が揃うだけでなく、
+    /// 「この画面は、あの行き先の設定だ」が色で分かる。
+    /// 一般・ショートカットのように行き先を持たない画面は無彩色のまま。
+    public var mode: LauncherMode? {
+        switch self {
+        case .general, .shortcuts, .appKeys, .features, .apps: return nil
+        case .clipboard: return .clipboard
+        case .fileSearch: return .files
+        }
+    }
+
     /// 記号（SF Symbols の名前）。
     /// ⚠️ macOS 14 に無い名前を書くと、絵が出ないまま静かに空欄になる。
     /// 迷ったら古くからある名前を選ぶ（`sparkles` のような新顔は避ける）
@@ -44,10 +59,15 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         case .general: return "gearshape"
         case .shortcuts: return "command"
         case .appKeys: return "keyboard"
-        case .features: return "square.grid.2x2"
-        case .apps: return "square.stack"
-        case .clipboard: return "doc.on.clipboard"
-        case .fileSearch: return "magnifyingglass"
+        // ⚠️ 「使う機能」は入切の画面なので、格子ではなく**スイッチ**。
+        // 「出すアプリ」はアプリが並ぶ画面なので格子。前は逆に近い当て方だった
+        case .features: return "switch.2"
+        case .apps: return "square.grid.2x2"
+        // ⚠️ 「重ねた書類」ではなく「箇条書きのバインダー」。履歴＝並んだ一覧なので意味が合う
+        case .clipboard: return "list.bullet.clipboard"
+        // ⚠️ ただの虫めがねにしない。横メニューの上に「設定を探す」の欄があり、
+        // そこにも虫めがねが出る。同じ絵が2つ並ぶと、どちらが何か一瞬迷う
+        case .fileSearch: return "doc.text.magnifyingglass"
         }
     }
 }
