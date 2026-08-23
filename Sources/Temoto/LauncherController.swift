@@ -1917,7 +1917,11 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
                 previewPane.show(spec, image: nil)
             }
         case .snippet(let snippet):
-            previewPane.show(ItemPreview.spec(for: snippet), image: nil)
+            // ⚠️ 「入っているか」も一緒に渡す。登録されていることと、今それが効くことは別
+            previewPane.show(ItemPreview.spec(
+                for: snippet,
+                expandsEverywhere: store.settings.expandSnippets
+                    && store.settings.isVisible(.snippets)), image: nil)
         default:
             previewPane.clear()
         }

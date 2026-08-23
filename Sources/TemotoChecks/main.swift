@@ -776,10 +776,27 @@ func checkClipboardKinds() {
     let snippetSpec = ItemPreview.spec(for: previewSnippet)
     expectEqual(snippetSpec.content, ItemPreview.Content.text("いつもお世話になっております。\n{date}"),
                 "定型文は差し込み前の生の本文を出す（何が書いてあるかを確かめる場所）")
-    expectEqual(snippetSpec.info.map(\.label), ["キーワード", "文字数"], "定型文の情報欄")
+    expectEqual(snippetSpec.info.map(\.label), ["キーワード", "自動展開", "文字数"], "定型文の情報欄")
     expectEqual(snippetSpec.info[0].value, "seikyu", "キーワードを出す")
     expect(!ItemPreview.spec(for: Snippet(title: "t", body: "b")).info.contains { $0.label == "キーワード" },
            "キーワードが無ければ行ごと消す")
+
+    // ── 「登録されている」と「今それが効く」を分けて言う
+    // ⚠️ 2026-08-23 作者「mailzと入力しても、j_ueda@zerocloud.jpが自動入力されない」。
+    // 画面は「キーワード mailz」とだけ出していて、設定が切であることをどこにも書いていなかった。
+    // キーワードがあると書いてあれば、打てば効くと思うのが当たり前
+    expect(snippetSpec.info.contains { $0.label == "自動展開" && $0.isWarning },
+           "自動展開が切なら、キーワードのすぐ下で知らせる")
+    expect(snippetSpec.info.first { $0.label == "自動展開" }?.value.contains("使う機能") == true,
+           "切のときは、どこを入れればよいかまで書く（「切です」だけでは探しに行けない）")
+    let onSpec = ItemPreview.spec(for: previewSnippet, expandsEverywhere: true)
+    expect(onSpec.info.contains { $0.label == "自動展開" && !$0.isWarning },
+           "入っているなら警告にしない")
+    expect(onSpec.info.first { $0.label == "自動展開" }?.value.contains("seikyu") == true,
+           "入っているときは、何と打てばよいかを出す")
+    expect(!ItemPreview.spec(for: Snippet(title: "t", body: "b"), expandsEverywhere: true)
+        .info.contains { $0.label == "自動展開" },
+           "キーワードが無い定型文には、自動展開の行を出さない（打ちようがない）")
 
     expectEqual(ByteSize.label(0), "0 B", "0バイトの表示")
     expectEqual(ByteSize.label(999), "999 B", "1KB未満はバイトで出す")

@@ -174,9 +174,23 @@ public enum ItemPreview {
 
     /// 定型文をプレビューに変える。
     /// 本文は差し込み前の生の形で出す（{date} が何になるかではなく、何が書いてあるかを確かめる場所）。
-    public static func spec(for snippet: Snippet) -> Spec {
+    ///
+    /// - Parameter expandsEverywhere: 合言葉の自動展開が入っているか。
+    ///
+    /// ⚠️ `expandsEverywhere` を受け取る理由（2026-08-23 作者
+    /// 「mailzと入力しても、j_ueda@zerocloud.jpが自動入力されない」）。
+    /// この画面は「キーワード mailz」とだけ出していた。**キーワードがあると書いてあれば、
+    /// 打てば効くと思う**のが当たり前で、実際は設定が切だったから何も起きなかった。
+    /// 「登録されている」と「今それが効く」は別の話なので、両方をここで言う。
+    /// ⚠️ 切のときは、どこを入れればよいかまで書く。「切です」だけでは探しに行けない
+    public static func spec(for snippet: Snippet, expandsEverywhere: Bool = false) -> Spec {
         var info: [Info] = []
-        if !snippet.keyword.isEmpty { info.append(Info("キーワード", snippet.keyword)) }
+        if !snippet.keyword.isEmpty {
+            info.append(Info("キーワード", snippet.keyword))
+            info.append(expandsEverywhere
+                ? Info("自動展開", "入（英数で「\(snippet.keyword)」と打つと、どのアプリでも本文に変わります）")
+                : Info("自動展開", "切（設定 → 使う機能 → 合言葉の自動展開 で入れられます）", isWarning: true))
+        }
         info.append(Info("文字数", "\(snippet.body.count)文字"))
         return Spec(content: .text(snippet.body), info: info)
     }
