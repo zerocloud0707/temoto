@@ -93,6 +93,10 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// 貼り付け先＝テモトを開く前まで前面だったアプリ。
     /// 3つの窓で1つを共有する（検索窓→メモと渡り歩いても見失わないように）。
     private var previousApp: NSRunningApplication? { coordinator.previousApp }
+    /// テモトを開く前に、その相手で使っていた窓。
+    /// ⚠️ 貼り付けのときに**その窓だけ**を前に出すために要る。
+    /// アプリだけ前に出すと、ブラウザのように窓を何枚も開くアプリでは別の窓が出てくる
+    private var previousWindow: AXUIElement? { coordinator.previousWindow }
     /// {query} の入力を待っている項目
     private var pendingItem: LauncherItem?
     /// 閉じている最中か（閉じる合図が複数の道から同時に来ても1回で済ませる）
@@ -1493,7 +1497,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         case .text:
             let target = previousApp
             close(reason: .finished)
-            Paster.paste(plan.text, into: target)
+            Paster.paste(plan.text, into: target, window: previousWindow)
             Toast.show(ClipJoin.message(for: plan))
 
         case .files:
@@ -1507,7 +1511,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
             let target = previousApp
             close(reason: .finished)
-            Paster.pasteFiles(paths, into: target) { [weak self] in
+            Paster.pasteFiles(paths, into: target, window: previousWindow) { [weak self] in
                 self?.watcher.ignoreCurrentChange()
             }
             Toast.show(ClipJoin.message(for: plan))
@@ -2393,7 +2397,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         // 焦点はこちらから触らない（Paster が自分で前面に出して貼るので、二重に動かすと取り合いになる）
         let target = previousApp
         close(reason: .finished)
-        Paster.paste(text, into: target) { [weak self] in
+        Paster.paste(text, into: target, window: previousWindow) { [weak self] in
             self?.watcher.ignoreCurrentChange()
         }
     }
@@ -2413,7 +2417,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
             let target = previousApp
             close(reason: .finished)
-            Paster.pasteImage(png, into: target) { [weak self] in
+            Paster.pasteImage(png, into: target, window: previousWindow) { [weak self] in
                 self?.watcher.ignoreCurrentChange()
             }
 
@@ -2425,7 +2429,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
             let target = previousApp
             close(reason: .finished)
-            Paster.pasteFiles(available, into: target) { [weak self] in
+            Paster.pasteFiles(available, into: target, window: previousWindow) { [weak self] in
                 self?.watcher.ignoreCurrentChange()
             }
             if available.count < clip.filePaths.count {

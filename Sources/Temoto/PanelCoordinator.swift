@@ -20,6 +20,15 @@ final class PanelCoordinator {
     /// 3つの窓で1つを共有する（渡り歩いても戻り先を見失わないように）。
     private(set) var previousApp: NSRunningApplication?
 
+    /// テモトを開く前に、その相手で焦点があった**窓**。
+    ///
+    /// ⚠️ アプリだけ覚えても足りない（2026-08-23 作者「コピー履歴を貼り付けると、
+    /// なぜか他のブラウザの表示が最前面になったりします」）。
+    /// ブラウザのように窓を何枚も開くアプリでは、アプリを前に出したときに
+    /// **どの窓が来るかは macOS が決める**ので、打っていた窓とは限らない。
+    /// ⚠️ アクセシビリティの許可が無いときは nil。そのときは今までどおりアプリだけ戻す
+    private(set) var previousWindow: AXUIElement?
+
     private var isVisibleChecks: [PanelKind: () -> Bool] = [:]
     private var closers: [PanelKind: (CloseReason) -> Void] = [:]
 
@@ -58,7 +67,23 @@ final class PanelCoordinator {
     func didClose(_ kind: PanelKind, reason: CloseReason) {
         updateOutsideClickMonitor()
         guard PanelBehavior.restoresPreviousApp(kind, reason: reason) else { return }
-        previousApp?.activate()
+        restorePreviousApp()
+    }
+
+    /// 元のアプリと、そのとき使っていた窓に戻す。
+    ///
+    /// ⚠️ `NSApp.yieldActivation(to:)` を先に呼ぶ。今の macOS は背面のプロセスが
+    /// 他アプリを前に出すのを黙って断るが、**いま前面にいる自分が譲る**のは正規の道。
+    /// これを使わずに「アプリを開き直す」（NSWorkspace.openApplication）と、
+    /// Dock のアイコンを押したのと同じ扱いになり、そのアプリの**窓が全部前に出る**。
+    func restorePreviousApp() {
+        guard let app = previousApp else { return }
+        NSApp.yieldActivation(to: app)
+        app.activate()
+        // 窓を覚えていれば、その窓だけを名指しで前に出す
+        if let window = previousWindow {
+            AXWindow.raise(window, of: app)
+        }
     }
 
     func isVisible(_ kind: PanelKind) -> Bool {
@@ -78,6 +103,8 @@ final class PanelCoordinator {
         let front = NSWorkspace.shared.frontmostApplication
         guard front?.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
         previousApp = front
+        // ⚠️ ここで撮っておく。テモトが前に出たあとでは、相手の「焦点のある窓」は取れない
+        previousWindow = AXWindow.focusedWindow(of: front)
     }
 
     // MARK: - 外をクリックしたら閉じる（保険）

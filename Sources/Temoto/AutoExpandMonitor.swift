@@ -98,7 +98,10 @@ enum AutoExpandMonitor {
         // 書きかけの文章が相手に飛ぶ（一番取り返しがつかない事故）。
         if body.contains("\n") {
             deleteTyped(hit.deleteCount)
-            Paster.paste(body, into: NSWorkspace.shared.frontmostApplication)
+            // ⚠️ 自動展開は「いま打っているアプリ」がそのまま相手なので、
+            // 覚えておく必要はない。ただし窓は名指ししておく（他の窓が前に出ないように）
+            let front = NSWorkspace.shared.frontmostApplication
+            Paster.paste(body, into: front, window: AXWindow.focusedWindow(of: front))
         } else {
             deleteTyped(hit.deleteCount)
             type(body)

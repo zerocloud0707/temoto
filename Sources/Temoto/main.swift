@@ -36,6 +36,11 @@ if let outputPath = SettingsPreview.parse(CommandLine.arguments) {
 
 // 「設定を探す」の行き先が実物と合っているかを確かめる（--check-settings-index）
 // 横メニューの記号の見かけの大きさが揃っているかを測る（--check-settings-glyphs）
+// 貼り付けのときに「元の窓だけ」が前に戻るかを実測する（--check-paste-focus [--old]）
+if CommandLine.arguments.contains("--check-paste-focus") {
+    exit(PasteFocusCheck.run(useOldWay: CommandLine.arguments.contains("--old")))
+}
+
 if CommandLine.arguments.contains("--check-settings-glyphs") {
     exit(SettingsGlyphCheck.run())
 }

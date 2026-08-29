@@ -31,6 +31,50 @@ enum AXWindow {
         return (value as! AXUIElement, pid)
     }
 
+    /// 指定したアプリで、いま焦点のある窓を返す。
+    ///
+    /// ⚠️ `focused()` は「いま前面のアプリ」を見るので、テモトが前に出たあとでは使えない。
+    /// 戻り先を覚えるのはテモトを開く**前**なので、相手を名指しできるこちらを使う。
+    static func focusedWindow(of app: NSRunningApplication?) -> AXUIElement? {
+        guard let pid = app?.processIdentifier else { return nil }
+        var value: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(
+            AXUIElementCreateApplication(pid),
+            kAXFocusedWindowAttribute as CFString,
+            &value
+        )
+        guard status == .success,
+              let value,
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    /// その窓だけを前に出す。
+    ///
+    /// ⚠️ これが要る理由（2026-08-23 作者「コピー履歴を貼り付けると、
+    /// なぜか他のブラウザの表示が最前面になったりします」）。
+    /// アプリを前に出すだけでは、**どの窓が前に来るかは macOS が決める**。
+    /// ブラウザのように窓を何枚も開くアプリでは、打っていた窓ではなく別の窓が出てくる。
+    /// 名指しした窓に「上がれ」と言い、そのうえで「これが主役／焦点」だと伝える。
+    ///
+    /// ⚠️ 3つとも投げる。`kAXRaiseAction` は重なりの順だけ、
+    /// `kAXMainWindow` はアプリの中の主役、`kAXFocusedWindow` はキー入力の行き先で、
+    /// アプリによってどれを見ているかが違う（1つだけだと効かない相手がいる）。
+    @discardableResult
+    static func raise(_ window: AXUIElement, of app: NSRunningApplication?) -> Bool {
+        let raised = AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success
+        var ok = raised
+        if let pid = app?.processIdentifier {
+            let element = AXUIElementCreateApplication(pid)
+            let main = AXUIElementSetAttributeValue(
+                element, kAXMainWindowAttribute as CFString, window) == .success
+            let focused = AXUIElementSetAttributeValue(
+                element, kAXFocusedWindowAttribute as CFString, window) == .success
+            ok = ok || main || focused
+        }
+        return ok
+    }
+
     /// 指定したアプリの、いちばん前の窓の位置と大きさ。
     ///
     /// ⚠️ `focused()` は「いま前面のアプリ」を見るので、テモトが前に出ている間は使えない。
