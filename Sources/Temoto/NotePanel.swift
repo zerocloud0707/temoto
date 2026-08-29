@@ -24,6 +24,18 @@ final class NoteController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTe
     private let panel: KeyPanel
 
     private let chip = ChipView(text: "メモ")
+
+    /// 入口（検索窓）へ戻るときに呼ぶ。
+    ///
+    /// ⚠️ これが要る理由（2026-08-30 作者「メモの画面からバックスペースや
+    /// 左上に矢印があってメニューに戻れる様にして欲しい」）。
+    /// メモは検索窓から入ってくるのに、**戻る道が esc（＝閉じる）しか無かった**。
+    /// 閉じると入口も消えるので、続けて別のことをするには呼び出しからやり直しになる。
+    /// 検索窓の中の行き先は ⌫ で親へ戻れるのに、メモだけ行き止まりだった。
+    var onGoBack: (() -> Void)?
+
+    /// 左上の戻る矢印
+    private let backButton = ChipButton(title: "")
     private let searchField = NSTextField()
     /// 選んでいるメモの保存先。切り替えると**そのメモが引っ越す**
     private let destinationPopup = ChipPopUpButton()
@@ -123,9 +135,23 @@ final class NoteController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTe
 
         // ── 上段: 札・検索・保存先・保存ボタン
         let headerY = height - header + 15
+
+        // ⚠️ 矢印は札の**左**に置く。macOS のどのアプリでも戻るは左上で、
+        // そこに無いと「戻れない画面」に見える（実際そう思われた）
+        backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "戻る")
+        backButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        backButton.imagePosition = .imageOnly
+        backButton.setAccessibilityLabel("戻る")
+        backButton.toolTip = "検索窓に戻る（⌫）"
+        backButton.target = self
+        backButton.action = #selector(goBack)
+        backButton.frame = NSRect(x: Theme.Space.edge, y: headerY + 3, width: 26, height: 24)
+        container.addSubview(backButton)
+
+        let chipX = Theme.Space.edge + 26 + 8
         let chipWidth = min(chip.frame.width, 120)
         chip.setFrameSize(NSSize(width: chipWidth, height: chip.frame.height))
-        chip.setFrameOrigin(NSPoint(x: Theme.Space.edge, y: headerY + (30 - chip.frame.height) / 2))
+        chip.setFrameOrigin(NSPoint(x: chipX, y: headerY + (30 - chip.frame.height) / 2))
         container.addSubview(chip)
 
         saveButton.target = self
@@ -149,7 +175,7 @@ final class NoteController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTe
         // 検索欄にはカプセルの淡い地を敷く（macOS 26 の Search Field の形）。
         // ⚠️ 検索窓（ランチャー）の大きな検索欄は裸のまま＝Spotlight と同じ顔が正しい。
         // こちらは補助の検索なので、枠が無いと「打てる場所」だと気づかれない
-        let searchX = Theme.Space.edge + chipWidth + 10
+        let searchX = chipX + chipWidth + 10
         let searchWidth = width - searchX - Theme.Space.edge - saveWidth - popupWidth - 26
         let searchBack = NSView(frame: NSRect(x: searchX - 2, y: headerY + 1, width: searchWidth + 4, height: 28))
         searchBack.wantsLayer = true
@@ -246,6 +272,9 @@ final class NoteController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTe
             HintAction("⌘N", "新規"),
             HintAction("⌘F", "検索"),
             HintAction("⌘⇧⌫", "削除"),
+            // ⚠️ 「戻る」と「閉じる」は違う。戻る＝入口へ、閉じる＝テモトごと消える。
+            // 左上の矢印を置いたうえで、ここにも書く（矢印に気づかない人のために）
+            HintAction("⌫", "戻る"),
             HintAction("esc", "閉じる", isEssential: true),
         ])
         // 札はクリックでも効く（キーの説明とボタンを同じ札が兼ねる）
@@ -796,6 +825,13 @@ final class NoteController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTe
             }
             close(reason: .escape)
             return true
+        case #selector(NSResponder.deleteBackward(_:)):
+            // ⚠️ 空のときだけ。打った字がある間は、ふつうに1文字消す。
+            // 検索窓の中の行き先（コピー履歴・定型文…）とまったく同じ決まりにしてある。
+            // ⚠️ 本文（textView）の ⌫ には触らない。あそこで戻ったら文章が書けない
+            guard searchField.stringValue.isEmpty else { return false }
+            goBack()
+            return true
         default:
             return false
         }
@@ -806,6 +842,14 @@ final class NoteController: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTe
         let next = min(max(tableView.selectedRow + step, 0), rows.count - 1)
         tableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
         tableView.scrollRowToVisible(next)
+    }
+
+    /// 入口（検索窓）へ戻る。
+    /// ⚠️ 先に保存する。メモは打つたびに保存しているが、
+    /// 変換中の字など「まだ確定していない分」が残っていることがある
+    @objc private func goBack() {
+        saveNow()
+        onGoBack?()
     }
 
     // MARK: - キー

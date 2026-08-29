@@ -83,6 +83,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.requireSecrets() else { return }
             self.note.show(selecting: note)
         }
+        // メモから入口へ戻る（左上の矢印・検索欄が空のときの ⌫）。
+        // ⚠️ `show(.all)` が先に PanelCoordinator.willOpen を通るので、メモ側は自分で閉じなくてよい
+        note.onGoBack = { [weak self] in self?.launcher.show(.all) }
         launcher.onOpenSettings = { [weak self] in self?.openSettings() }
         launcher.onShowProblems = { ErrorReporter.showReport() }
         // 棚の「＋」＝アプリを足しに行く（タブまで指定して連れていく）
