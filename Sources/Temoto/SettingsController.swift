@@ -31,6 +31,10 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate,
     private let onClearClips: () -> Void
     /// 警告のしるし（メニューバー）を合わせ直してもらう合図。ログイン項目を切り替えたときに呼ぶ
     private let onStatusChanged: () -> Void
+    /// 登録できなかったキー（他のアプリに先に押さえられているもの）。
+    /// ⚠️ これが「かぶり」のいちばん確かな証拠。設定画面の重複チェックは
+    /// テモトの中しか見られないが、こちらは**他アプリに取られた事実**そのもの
+    private let failedShortcuts: () -> [Shortcut]
     /// 窓の交通整理（戻り先の記録と、他の窓をどかす手配）
     private let coordinator: PanelCoordinator
 
@@ -65,7 +69,8 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate,
         appRecords: @escaping () -> [AppRecord],
         rescanApps: @escaping () -> Void,
         onClearClips: @escaping () -> Void,
-        onStatusChanged: @escaping () -> Void
+        onStatusChanged: @escaping () -> Void,
+        failedShortcuts: @escaping () -> [Shortcut] = { [] }
     ) {
         self.store = store
         self.coordinator = coordinator
@@ -75,6 +80,7 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate,
         self.rescanApps = rescanApps
         self.onClearClips = onClearClips
         self.onStatusChanged = onStatusChanged
+        self.failedShortcuts = failedShortcuts
         super.init()
         coordinator.register(
             .settings,
@@ -352,7 +358,164 @@ final class SettingsController: NSObject, NSWindowDelegate, NSTextFieldDelegate,
         case .apps: return buildAppTab()
         case .clipboard: return buildClipboardTab()
         case .fileSearch: return buildFileSearchTab()
+        case .hotkeys: return buildHotkeyTab()
         }
+    }
+
+    // MARK: - キーのかぶり
+
+    /// 「どのキーが誰に取られているか」を1画面で見せる。
+    ///
+    /// 2026-08-30 作者「テモトにかかわらず全てのショートカットを確認できる仕組みにできないかな？？
+    /// ショートカットがかぶっているので、設定できなかったり、動かなかったりする」。
+    ///
+    /// ⚠️ できること・できないことを画面にも正直に書く:
+    /// - ✅ macOS 自身のショートカット: 設定ファイルに全部書いてあるので読める
+    /// - ✅ テモトの割り当て・登録に失敗したキー
+    /// - ❌ **他のアプリ（Raycast等）が押さえているキーの一覧**: macOS に聞く窓口が無い。
+    ///   ただし「登録できなかった」という事実からは分かるので、それを出す。
+    /// 「全部見える」と書いて実際は見えないのが、いちばん信用を失う。
+    private func buildHotkeyTab() -> NSView {
+        let pane = PaneBuilder(self)
+
+        let system = SystemHotkeys.active(systemHotkeyDomain())
+        let mine = store.settings.allShortcuts
+        let failed = failedShortcuts()
+        let crossHits = SystemHotkeys.conflicts(between: system, and: mine)
+        let selfHits = store.settings.conflicts()
+
+        // ── ぶつかっているもの（あるときだけ・いちばん上）
+        if !failed.isEmpty || !crossHits.isEmpty || !selfHits.isEmpty {
+            pane.section("ぶつかっています")
+
+            for shortcut in failed {
+                let name = mine.first { $0.shortcut == shortcut }?.name ?? "どれか"
+                pane.add(conflictRow(
+                    shortcut.displayString,
+                    "「\(name)」に割り当てましたが、**他のアプリが先に押さえていて登録できません**。"
+                    + "そのアプリ側で外すか、テモトのキーを変えてください。"))
+            }
+            for hit in selfHits {
+                pane.add(conflictRow(
+                    hit.shortcut.displayString,
+                    "テモトの中で重なっています（\(hit.names.joined(separator: "・"))）。"
+                    + "先に登録した方だけが効きます。"))
+            }
+            for hit in crossHits {
+                pane.add(conflictRow(
+                    hit.system.shortcut?.displayString ?? "",
+                    "macOS の「\(hit.system.name)」と同じです（テモトでは「\(hit.mineName)」）。"
+                    + "macOS が先に取るので、テモト側は効かないことがあります。"))
+            }
+            pane.add(openKeyboardSettingsRow())
+        } else {
+            pane.section("ぶつかっています")
+            pane.add(caption("いまのところ、ぶつかっているキーはありません。", lines: 1))
+        }
+
+        // ── テモトの割り当て
+        pane.section("テモトが使っているキー")
+        if mine.isEmpty {
+            pane.add(caption("まだ何も割り当てていません。", lines: 1))
+        } else {
+            for assignment in mine.sorted(by: { $0.name < $1.name }) {
+                pane.add(keyRow(assignment.shortcut.displayString, assignment.name,
+                                warn: failed.contains(assignment.shortcut)))
+            }
+        }
+
+        // ── macOS 自身
+        pane.section("macOS が使っているキー")
+        pane.add(caption(
+            "システム設定 → キーボード → キーボードショートカット の中身です（入になっているものだけ）。"
+            + "ここに出ているキーは macOS が先に取るので、テモトや他のアプリでは効きません。", lines: 3))
+        // ⚠️ 番号のままのものが必ず出る。理由を書かないと「作りかけ」に見える
+        pane.add(caption(
+            "後ろの「システムの機能 #番号」は、Apple が名前を公にしていない機能です。"
+            + "何かは分かりませんが、そのキーが取られていることは確かです。", lines: 2))
+        if system.isEmpty {
+            pane.add(caption("読めませんでした。", lines: 1))
+        } else {
+            // ⚠️ ここで並べ直さない。`active(_:)` が
+            // 「名前が分かるもの → 番号だけのもの」に並べてある
+            let taken = Set(crossHits.compactMap { $0.system.shortcut })
+            for entry in system {
+                guard let shortcut = entry.shortcut else { continue }
+                pane.add(keyRow(shortcut.displayString, entry.name, warn: taken.contains(shortcut)))
+            }
+        }
+        pane.add(openKeyboardSettingsRow())
+
+        // ── 見えないもの（正直に書く）
+        pane.section("ここに出ないもの")
+        pane.add(caption(
+            "他のアプリ（Raycast・Alfred など）が押さえているキーは、macOS に聞く方法がないため一覧にできません。"
+            + "ただしテモトが登録できなかったキーは、上の「ぶつかっています」に必ず出ます。"
+            + "「設定したのに効かない」ときは、まずそこを見てください。", lines: 4))
+
+        return pane.build()
+    }
+
+    /// macOS のショートカットの設定を読む。
+    /// ⚠️ 読めなくても落とさない（他人の設定ファイルなので、形が変わることがある）
+    private func systemHotkeyDomain() -> [String: Any] {
+        UserDefaults(suiteName: "com.apple.symbolichotkeys")?
+            .dictionary(forKey: "AppleSymbolicHotKeys") ?? [:]
+    }
+
+    /// キー1つの行（左に札・右に名前）
+    private func keyRow(_ keys: String, _ name: String, warn: Bool) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.alignment = .centerY
+
+        let cap = NSTextField(labelWithString: keys)
+        cap.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        cap.alignment = .right
+        cap.textColor = warn ? .systemRed : .labelColor
+        cap.translatesAutoresizingMaskIntoConstraints = false
+        cap.widthAnchor.constraint(equalToConstant: 110).isActive = true
+
+        let label = NSTextField(labelWithString: name)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = Theme.Palette.captionText
+        label.lineBreakMode = .byTruncatingTail
+        label.preferredMaxLayoutWidth = SettingsController.cardTextWidth - 120
+
+        row.addArrangedSubview(cap)
+        row.addArrangedSubview(label)
+        return row
+    }
+
+    /// ぶつかっている1件（札＋説明）
+    private func conflictRow(_ keys: String, _ message: String) -> NSView {
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 2
+
+        let cap = NSTextField(labelWithString: keys)
+        cap.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        cap.textColor = .systemRed
+
+        let label = caption(message.replacingOccurrences(of: "**", with: ""), lines: 3)
+        label.preferredMaxLayoutWidth = SettingsController.cardTextWidth
+
+        column.addArrangedSubview(cap)
+        column.addArrangedSubview(label)
+        return column
+    }
+
+    private func openKeyboardSettingsRow() -> NSView {
+        ChipButton(title: "キーボードの設定を開く", target: self, action: #selector(openKeyboardPane))
+    }
+
+    @objc private func openKeyboardPane() {
+        // ⚠️ 直に「ショートカット」の段まで開く道はOSが用意していないので、
+        // キーボードの画面まで連れて行く（そこから1回押せば着く）
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: - 道具棒（中身は空）

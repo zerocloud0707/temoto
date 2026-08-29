@@ -450,6 +450,8 @@ final class KeyCapView: NSView {
     private let textLabel = NSTextField(labelWithString: "")
     /// クリックされたとき。設定されていれば、乗せたときに札が浮く
     var onTap: (() -> Void)?
+    /// 狭くても隠してはいけない札か（esc など、これが無いと出口が分からなくなるもの）
+    private(set) var isEssential: Bool = false
     private var isHovering = false
 
     /// 札そのものの高さ。下の帯の高さもこれに合わせる
@@ -463,6 +465,7 @@ final class KeyCapView: NSView {
 
     init(action: HintAction, scale: CGFloat = 1) {
         self.scale = scale
+        self.isEssential = action.isEssential
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -662,26 +665,45 @@ final class HintBarView: NSView {
         let gap: CGFloat = 12
         let capY = (bounds.height - KeyCapView.capHeight) / 2
 
-        // 右から順に置く。入りきらないものは隠す。
-        // ⚠️ 消すのは後ろ（右端）から。前に置いた操作ほどよく使う並びにしてあるので、
-        // 右から消せば、狭くても大事なものが残る。
-        var x = bounds.width - Theme.Space.edge
-        var usedWidth: CGFloat = 0
         // 左の報告文には最低これだけ残す（キーで押し潰して件数が消えないように）
         let statusFloor: CGFloat = 180
         let available = max(bounds.width - Theme.Space.edge * 2 - statusFloor, 0)
 
-        for cap in capViews.reversed() {
-            let width = cap.frame.width
-            if usedWidth + width + gap > available {
-                cap.isHidden = true
-                continue
-            }
-            cap.isHidden = false
-            x -= width
+        // 入りきらないものは隠す。**どれを隠すか**が肝。
+        //
+        // ⚠️ 2026-08-30 に直した。それまでは右端から詰めて、入らなくなったものを
+        // 順に隠していた。右端から詰めると、隠れるのは**配列の先頭側＝いちばんよく使う操作**。
+        // 実際、ファイル検索に1つ足しただけで「⌘⏎ Finder」が消えた。
+        // すぐ上に「大事なものが残る」と書いてあったのに、逆のことをしていた。
+        //
+        // 直した決まり:
+        // 1. `isEssential`（esc）は何があっても残す。先に場所を取っておく
+        // 2. 残りは**配列の順に**取る（前ほどよく使う並びにしてある）
+        // 3. 入らなくなったら、そこから後ろを隠す
+        let essential = capViews.filter { $0.isEssential }
+        let optional = capViews.filter { !$0.isEssential }
+        let essentialWidth = essential.reduce(CGFloat(0)) { $0 + $1.frame.width + gap }
+
+        var kept: [KeyCapView] = []
+        var usedWidth = essentialWidth
+        for cap in optional {
+            let width = cap.frame.width + gap
+            if usedWidth + width > available { break }
+            usedWidth += width
+            kept.append(cap)
+        }
+        let shown = Set(kept.map(ObjectIdentifier.init))
+        for cap in optional { cap.isHidden = !shown.contains(ObjectIdentifier(cap)) }
+        essential.forEach { $0.isHidden = false }
+
+        // 並びは元の順のまま、右端に寄せて置く
+        // （並べ替えると「さっきと違う場所にある」になって目が迷う）
+        let order = capViews.filter { !$0.isHidden }
+        var x = bounds.width - Theme.Space.edge
+        for cap in order.reversed() {
+            x -= cap.frame.width
             cap.setFrameOrigin(NSPoint(x: x, y: capY))
             x -= gap
-            usedWidth += width + gap
         }
 
         let statusWidth = max(x - Theme.Space.edge, 0)

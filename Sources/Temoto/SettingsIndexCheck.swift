@@ -90,7 +90,7 @@ enum SettingsIndexCheck {
 
         if failures.isEmpty {
             print("設定の探し先: \(SettingsSearch.items.count)件すべて、書いてある画面に実在します")
-            print("窓の大きさ: 7画面とも \(Int(expected.width))x\(Int(expected.height)) のまま変わりません")
+            print("窓の大きさ: \(SettingsPane.allCases.count)画面とも \(Int(expected.width))x\(Int(expected.height)) のまま変わりません")
             return 0
         }
         for f in failures { print("  🔴 \(f)") }

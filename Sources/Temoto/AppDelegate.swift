@@ -67,7 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 「履歴をすべて消す」はメニューから設定画面へ移した（実体はこちらに残す）
             onClearClips: { [weak self] in self?.clearClips() },
             // ログイン項目を設定画面で切り替えた直後に、メニューバーの警告のしるしを合わせる
-            onStatusChanged: { [weak self] in self?.refreshStatusIcon() }
+            onStatusChanged: { [weak self] in self?.refreshStatusIcon() },
+            failedShortcuts: { [weak self] in self?.failedShortcuts.map(\.shortcut) ?? [] }
         )
 
         // 検索窓の中から、メモと設定へ抜けられるようにする。

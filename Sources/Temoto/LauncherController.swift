@@ -119,6 +119,15 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
     private var isPreviewing = false
     /// Quick Look に見せているファイル
     private var previewURLs: [URL] = []
+    /// つまんで運んでいる最中か。
+    ///
+    /// ⚠️ Quick Look と同じ罠。ドラッグを始めると相手のアプリに焦点が移り、
+    /// そのまま `windowDidResignKey` で窓が閉じる＝**運んでいる途中で手が消える**。
+    /// 落とすまでは閉じない（2026-08-30 作者「対象のファイルをドラッグ&ドロップし、
+    /// どこかにアップしたりできる様にしたい」）
+    private var isDragging = false
+    /// 運ぶために書き出した一時フォルダ（落とし終わったら片付ける）
+    private var dragTempFolders: [URL] = []
     /// 確認ダイアログ（☆保存・⌘E編集）を出している最中か。
     /// ⚠️ Quick Look と同じ罠: ダイアログに焦点が移ると外クリック扱いで窓が裏で閉じる
     private var isShowingDialog = false
@@ -326,6 +335,10 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         tableView.delegate = self
         // 右クリックの品書き。キーを覚えていなくても、消す・コピーする道がある状態にする
         tableView.contextMenuProvider = { [weak self] row in self?.contextMenu(forRow: row) }
+        // ⚠️ `forLocal: false` ＝**他のアプリへ**運べるようにする。
+        // 既定は自分の中だけなので、これが無いとブラウザやFinderに落とせない
+        tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        tableView.setDraggingSourceOperationMask([], forLocal: true)
         tableView.target = self
         tableView.doubleAction = #selector(rowDoubleClicked)
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("main"))
@@ -1173,7 +1186,8 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard PanelBehavior.closesWhenFocusLost(.launcher) else { return }
         // ⚠️ Quick Look を出した瞬間もここへ来る。閉じるとプレビューだけが宙に浮く。
         // 確認ダイアログ（☆保存・⌘E編集）も同じ（裏で閉じると答えた後に戻れない）。
-        guard !isPreviewing, !isShowingDialog else { return }
+        // ⚠️ 運んでいる最中もここへ来る。閉じるとドラッグごと消える
+        guard !isPreviewing, !isShowingDialog, !isDragging else { return }
         close(reason: .focusLost)
     }
 
@@ -1880,6 +1894,108 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         view.configure(item: entry.item, matchedIndices: entry.result.matchedIndices, compact: isTwoPane)
         return view
+    }
+
+    // MARK: - つまんで運ぶ（ドラッグ&ドロップ）
+
+    /// 1行を「運べるもの」に変える。nil を返した行はつまめない。
+    ///
+    /// ⚠️ 何を渡すかで、落とせる場所が決まる:
+    /// - **ファイルの場所（URL）** を渡すと、ブラウザのアップロード欄・Finder・メールの添付に落ちる
+    /// - 文字を渡すと、書ける場所にしか落ちない
+    /// アップロードしたいという話なので、ファイルになるものは**必ず URL で渡す**。
+    /// ⚠️ 絵は暗号化してしまってあり、そのままでは場所が無い。
+    /// つまんだ瞬間だけ一時フォルダに書き出して、その場所を渡す（落とし終わったら片付ける）。
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard row >= 0, row < results.count else { return nil }
+        switch results[row].item.kind {
+        case .file(let hit):
+            // ⚠️ 実在を確かめる。消えたファイルの場所を渡すと、相手側で黙って失敗する
+            guard FileManager.default.fileExists(atPath: hit.path) else { return nil }
+            return URL(fileURLWithPath: hit.path) as NSURL
+
+        case .clip(let clip):
+            switch clip.kind {
+            case .file:
+                guard let path = clip.filePaths.first,
+                      FileManager.default.fileExists(atPath: path) else { return nil }
+                return URL(fileURLWithPath: path) as NSURL
+            case .image:
+                guard let url = writeDragImage(clip) else { return nil }
+                return url as NSURL
+            case .text:
+                return clip.text as NSString
+            }
+
+        case .snippet(let snippet):
+            return snippet.body as NSString
+
+        default:
+            // アプリ・コマンド・行き先はつまめない（運ぶ中身が無い）
+            return nil
+        }
+    }
+
+    /// 絵を一時フォルダに書き出して、その場所を返す。
+    /// ⚠️ 名前を「画像.png」で固定する。読み取った文字を名前にすると、
+    /// **渡した相手のファイル名に中身が出る**（writeSelectionToFiles と同じ理由）
+    private func writeDragImage(_ clip: ClipItem) -> URL? {
+        guard let png = store.loadClipImage(id: clip.id) else { return nil }
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("テモト-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent("画像.png")
+            try png.write(to: url)
+            dragTempFolders.append(folder)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession,
+                   willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+        isDragging = true
+
+        // ⚠️ 1行に**複数のファイル**が入っていることがある（Finderでまとめてコピーした履歴）。
+        // 表は1行につき1つしか渡してくれないので、残りをここで足す。
+        // 足さないと「3つコピーしたのに1つしか落ちない」という黙った取りこぼしになる
+        var extras: [NSPasteboardWriting] = []
+        for row in rowIndexes {
+            guard row < results.count, case .clip(let clip) = results[row].item.kind,
+                  clip.kind == .file, clip.filePaths.count > 1 else { continue }
+            for path in clip.filePaths.dropFirst() where FileManager.default.fileExists(atPath: path) {
+                extras.append(URL(fileURLWithPath: path) as NSURL)
+            }
+        }
+        if !extras.isEmpty { session.draggingPasteboard.writeObjects(extras) }
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession,
+                   endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        isDragging = false
+        // 落とせたら窓は退く（相手のアプリで続きをするはずなので、前に居座らない）。
+        // ⚠️ 落とさずに戻したとき（operation が空）は閉じない。やめただけで窓まで消えると乱暴
+        if !operation.isEmpty {
+            close(reason: .finished)
+        } else if !panel.isKeyWindow {
+            // 焦点は他所へ移ったのに落とさなかった場合。
+            // 閉じないと、押していないのに窓が残り続ける
+            close(reason: .focusLost)
+        }
+        cleanUpDragTemp()
+    }
+
+    /// 運ぶために書き出した一時フォルダを片付ける。
+    /// ⚠️ すぐには消さない。落とした直後は相手がまだ読んでいることがある
+    private func cleanUpDragTemp() {
+        let folders = dragTempFolders
+        dragTempFolders = []
+        guard !folders.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) {
+            for folder in folders { try? FileManager.default.removeItem(at: folder) }
+        }
     }
 
     /// 選んでいる行の見た目を自前で描くための下地。

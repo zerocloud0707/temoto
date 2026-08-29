@@ -22,6 +22,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     case apps
     case clipboard
     case fileSearch
+    case hotkeys
 
     /// 横メニューに出す名前
     public var title: String {
@@ -33,6 +34,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         case .apps: return "出すアプリ"
         case .clipboard: return "コピー履歴"
         case .fileSearch: return "ファイル検索"
+        case .hotkeys: return "キーのかぶり"
         }
     }
 
@@ -45,7 +47,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     /// 一般・ショートカットのように行き先を持たない画面は無彩色のまま。
     public var mode: LauncherMode? {
         switch self {
-        case .general, .shortcuts, .appKeys, .features, .apps: return nil
+        case .general, .shortcuts, .appKeys, .features, .apps, .hotkeys: return nil
         case .clipboard: return .clipboard
         case .fileSearch: return .files
         }
@@ -72,6 +74,8 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         case .features: return "switch.2"
         // アプリが並ぶ画面なので格子
         case .apps: return "square.grid.2x2"
+        // ⚠️ 重なりを見る画面なので、重なった四角。虫めがねにすると検索欄と紛れる
+        case .hotkeys: return "square.on.square.dashed"
         case .clipboard, .fileSearch: return ""   // 上の mode で引くので、ここには来ない
         }
     }
@@ -90,6 +94,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         case .appKeys: return 9.25      // keyboard（横に長いので一番小さい）
         case .features: return 11.0     // switch.2
         case .apps: return 11.0         // square.grid.2x2
+        case .hotkeys: return 10.5      // square.on.square.dashed
         case .clipboard: return 9.0     // doc.on.clipboard（2枚重ねで縦に長い）
         case .fileSearch: return 10.75  // doc.text.magnifyingglass
         }
@@ -194,6 +199,12 @@ public enum SettingsSearch {
                      keywords: ["フォルダ", "対象", "範囲", "どこを探す"]),
         SettingsItem(pane: .fileSearch, title: "中身も探す（名前に出てこない言葉でも見つかる）",
                      keywords: ["全文", "中身", "本文", "spotlight"]),
+        // ── キーのかぶり
+        SettingsItem(pane: .hotkeys, title: "macOS が使っているキー",
+                     keywords: ["システム", "重複", "かぶり", "衝突", "効かない", "spotlight", "使えない"]),
+        SettingsItem(pane: .hotkeys, title: "テモトが使っているキー",
+                     keywords: ["一覧", "割り当て", "重複", "かぶり", "hotkey"]),
+
         SettingsItem(pane: .fileSearch, title: "出す件数",
                      keywords: ["上限", "多すぎる", "絞る", "何件"]),
     ]

@@ -3805,6 +3805,7 @@ checkShelfKeys()
 checkShelfFocus()
 checkSettingsPanes()
 checkSettingsSurface()
+checkSystemHotkeys()
 checkQuickOpen()
 checkShortcutInventory()
 checkCaptureShot()
@@ -5343,7 +5344,10 @@ func checkSettingsPanes() {
     section("設定の横メニュー")
 
     // ── 画面そのもの
-    expect(SettingsPane.allCases.count == 7, "画面は7つ")
+    // ⚠️ 数を直に書かない。画面を足すたびに落ちて、直し方が「数字を増やす」になる
+    // ＝検査が何も守らなくなる（2026-08-30、8つ目を足して実際に落ちた）。
+    // 大事なのは「数」ではなく「全部に名前と記号と探せる設定があること」で、それは下で見ている
+    expect(SettingsPane.allCases.count >= 7, "画面がある")
     let titles = SettingsPane.allCases.map(\.title)
     expect(Set(titles).count == titles.count, "画面の名前がかぶらない")
     expect(titles.allSatisfy { !$0.isEmpty }, "名前の無い画面が無い")
@@ -5440,4 +5444,81 @@ func checkSettingsSurface() {
     let wrongText = Contrast.Tones.caption.gray(on: wrong, isDark: true)
     expect(Contrast.ratio(wrongText, wrong) < Contrast.Threshold.readableText,
            "暗い見た目で面に白を重ねると読めなくなる（だから黒を重ねている）")
+}
+
+
+// MARK: - macOS 自身のショートカット
+
+func checkSystemHotkeys() {
+    section("macOS のショートカットを読む")
+
+    // 実機から採ったそのままの形（defaults read com.apple.symbolichotkeys）
+    let domain: [String: Any] = [
+        // Spotlight ⌘Space
+        "64": ["enabled": 1,
+               "value": ["parameters": [32, 49, 1048576], "type": "standard"]],
+        // 左の操作スペースへ ⌃←
+        "79": ["enabled": 1,
+               "value": ["parameters": [65535, 123, 262144], "type": "standard"]],
+        // 切ってあるもの（Launchpad）
+        "160": ["enabled": 0,
+                "value": ["parameters": [65535, 65535, 0], "type": "standard"]],
+        // 知らない番号
+        "999": ["enabled": 1,
+                "value": ["parameters": [97, 0, 1572864], "type": "standard"]],
+    ]
+
+    let all = SystemHotkeys.parse(domain)
+    expectEqual(all.count, 4, "4件とも読む")
+    expect(all.map(\.id) == [64, 79, 160, 999], "番号順に並べる（読むたびに順が変わると目で追えない）")
+
+    let spotlight = all.first { $0.id == 64 }
+    expectEqual(spotlight?.name, "Spotlight検索", "知っている番号は名前で出す")
+    expectEqual(spotlight?.shortcut?.displayString, "⌘Space", "⌘Space と読める")
+
+    let space = all.first { $0.id == 79 }
+    expectEqual(space?.name, "左の操作スペースへ移動", "矢印キーの機能も名前が出る")
+    expectEqual(space?.shortcut?.displayString, "⌃←", "文字にならないキーは記号で読む")
+
+    expectEqual(all.first { $0.id == 999 }?.name, "システムの機能 #999",
+                "知らない番号は番号のまま出す（嘘の名前を付けない）")
+
+    // ⚠️ 切ってある機能は「かぶり」ではない。押しても何も起きないので、
+    // これを重複として出すと、直さなくてよいものを直させることになる
+    let active = SystemHotkeys.active(domain)
+    expect(!active.contains { $0.id == 160 }, "切ってあるものは一覧に出さない")
+
+    // ── かぶりを見つける
+    let mine: [(name: String, shortcut: Shortcut)] = [
+        // ⌘Space ＝ Spotlight とまるかぶり
+        ("検索を開く", Shortcut(keyCode: 49, carbonModifiers: Shortcut.cmdBit, keyLabel: "Space")),
+        // ⌃⌥V ＝ どれともかぶらない
+        ("コピー履歴", Shortcut(keyCode: 9, carbonModifiers: Shortcut.controlBit | Shortcut.optionBit, keyLabel: "V")),
+    ]
+    let hits = SystemHotkeys.conflicts(between: all, and: mine)
+    expectEqual(hits.count, 1, "かぶっている1件だけを挙げる")
+    expectEqual(hits.first?.system.name, "Spotlight検索", "相手の名前が分かる")
+    expectEqual(hits.first?.mineName, "検索を開く", "こちらのどれとかぶったかも分かる")
+
+    // ⚠️ 文字の読みが違っても、同じキーなら同じと見なす。
+    // keyLabel まで比べると「Space」と「space」で別物になり、かぶりを見落とす
+    let differentLabel: [(name: String, shortcut: Shortcut)] = [
+        ("検索を開く", Shortcut(keyCode: 49, carbonModifiers: Shortcut.cmdBit, keyLabel: "スペース")),
+    ]
+    expectEqual(SystemHotkeys.conflicts(between: all, and: differentLabel).count, 1,
+                "読みの文字が違っても、キーが同じならかぶりと見なす")
+
+    // 切ってある機能とはかぶらない
+    let againstDisabled: [(name: String, shortcut: Shortcut)] = [
+        ("何か", Shortcut(keyCode: 65535, carbonModifiers: 0, keyLabel: "")),
+    ]
+    expect(SystemHotkeys.conflicts(between: all, and: againstDisabled).isEmpty,
+           "切ってある機能はかぶりに数えない")
+
+    // 壊れた形でも落ちない（設定ファイルは人が触れる場所にある）
+    expect(SystemHotkeys.parse([:]).isEmpty, "空でも落ちない")
+    expect(SystemHotkeys.parse(["abc": ["enabled": 1]]).isEmpty, "番号でない鍵は無視する")
+    expectEqual(SystemHotkeys.parse(["1": ["enabled": 1]]).count, 1, "値が無くても行は作る")
+    expect(SystemHotkeys.parse(["1": ["enabled": 1]]).first?.shortcut == nil,
+           "値が無ければキーは nil（適当に埋めない）")
 }

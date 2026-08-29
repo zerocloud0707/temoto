@@ -272,14 +272,19 @@ enum DesignPreview {
     private static func addHintBar(_ canvas: NSView, width: CGFloat, height: CGFloat, hintRow: CGFloat) {
         // 下の帯
         let hint = HintBarView(frame: NSRect(x: 0, y: height - hintRow, width: width, height: hintRow))
-        // ⚠️ 棚を出している絵なので、実物と同じく「←→ アプリ」も入れる
-        // （下絵と実物がずれると、絵で見た目を確かめる意味が無くなる）
-        var actions = LauncherMode.all.actions
-        if let spot = actions.firstIndex(where: { $0.keys == "↑↓" }) {
+        // ⚠️ **描いている行き先の案内**を出す。
+        // ここを `.all` に決め打ちしていたせいで、`--mode files` で撮っても
+        // 入口の案内が写り、案内バーを絵で確かめられなかった
+        // （2026-08-30、ファイル検索に「ドラッグ 運ぶ」を足したのに絵に出なくて気づいた。
+        //  すぐ下に「下絵と実物がずれると絵で確かめる意味が無くなる」と自分で書いてあった）。
+        let mode = parseMode(CommandLine.arguments) ?? .all
+        var actions = mode.actions
+        // 棚を出している絵なので、入口のときだけ実物と同じく「←→ アプリ」も入れる
+        if mode == .all, let spot = actions.firstIndex(where: { $0.keys == "↑↓" }) {
             actions.insert(HintAction("←→", "アプリ"), at: actions.index(after: spot))
         }
         hint.setActions(actions)
-        hint.status = "コピーした文字をさかのぼって貼り付ける"
+        hint.status = mode.summary
         hint.layoutSubtreeIfNeeded()
         canvas.addSubview(hint)
         let hintLine = HairlineView(frame: NSRect(x: 0, y: height - hintRow, width: width, height: 1))
