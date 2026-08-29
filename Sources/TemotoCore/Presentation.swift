@@ -178,7 +178,7 @@ public enum ItemPreview {
     /// - Parameter expandsEverywhere: 合言葉の自動展開が入っているか。
     ///
     /// ⚠️ `expandsEverywhere` を受け取る理由（2026-08-23 作者
-    /// 「mailzと入力しても、j_ueda@zerocloud.jpが自動入力されない」）。
+    /// 「mailzと入力しても、you@example.com が自動入力されない」）。
     /// この画面は「キーワード mailz」とだけ出していた。**キーワードがあると書いてあれば、
     /// 打てば効くと思う**のが当たり前で、実際は設定が切だったから何も起きなかった。
     /// 「登録されている」と「今それが効く」は別の話なので、両方をここで言う。

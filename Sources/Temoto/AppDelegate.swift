@@ -38,7 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // なので、鍵の要らないもの（設定・リンク・コマンド）だけ先に読んで画面を立て、
         // 鍵は別スレッドで取りに行く。ダイアログを放置しても、
         // ウィンドウ操作とランチャーはその間ずっと使える。
-        let isFirstRun = store.loadPlaintext()
+        // ⚠️ 返り値（初回起動か）は使わない。初回の案内は `settings.welcomeDone` で
+        // 判断するように移した（`Welcome.shouldOpenOnLaunch`）。
+        // 受け取ったまま使わない変数を残すと、組み立てのたびに警告が出て、
+        // 本当に見るべき警告（Vault の非推奨2件）が埋もれる
+        store.loadPlaintext()
 
         watcher = ClipboardWatcher(settings: store.settings.clipboard)
         watcher.onDecision = { [weak self] decision, capture in

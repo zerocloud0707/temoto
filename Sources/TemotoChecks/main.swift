@@ -782,7 +782,7 @@ func checkClipboardKinds() {
            "キーワードが無ければ行ごと消す")
 
     // ── 「登録されている」と「今それが効く」を分けて言う
-    // ⚠️ 2026-08-23 作者「mailzと入力しても、j_ueda@zerocloud.jpが自動入力されない」。
+    // ⚠️ 2026-08-23 作者「mailzと入力しても、you@example.com が自動入力されない」。
     // 画面は「キーワード mailz」とだけ出していて、設定が切であることをどこにも書いていなかった。
     // キーワードがあると書いてあれば、打てば効くと思うのが当たり前
     expect(snippetSpec.info.contains { $0.label == "自動展開" && $0.isWarning },
@@ -2935,11 +2935,11 @@ func checkCommandGrouping() {
     let commands = [
         command("フォルダを開く: ABC（サンプル商事）"),
         command("フォルダを開く: DEF（サンプル物産）"),
-        command("フォルダを開く: TRR（チームロロ）"),
+        command("フォルダを開く: GHI（サンプル工業）"),
         command("今日の日次作業ログを開く"),
         command("作業ログ ABC"),
         command("作業ログ DEF"),
-        command("作業ログ TRR"),
+        command("作業ログ GHI"),
         command("今日の日記を開く"),
     ]
     let organized = CommandGrouping.organize(commands)
@@ -3752,82 +3752,6 @@ func checkQuickAnswer() {
     expect(minus?.detail.contains("税込") == false, "マイナスに税込は出さない")
 }
 
-// MARK: - 実行
-
-if CommandLine.arguments.contains("--diagnose") {
-    runDiagnosis()
-}
-
-print("テモト 動作確認")
-
-checkCoordinates()
-checkLayout()
-checkScreens()
-checkFuzzy()
-checkJapaneseReading()
-checkClipboardGuard()
-checkRetention()
-checkClipboardKinds()
-checkSnippets()
-checkCommands()
-
-do {
-    try checkVault()
-    try checkKeychain()
-    try checkStore()
-try checkStartupPhases()
-} catch {
-    print("  NG   検証中に例外: \(error)")
-    failures.append("検証中の例外: \(error)")
-}
-
-checkShortcuts()
-checkFeatureVisibility()
-checkAppVisibility()
-checkPanelBehavior()
-checkLauncherMode()
-checkFileQuery()
-checkCommandGrouping()
-checkMenuPlan()
-checkNotes()
-checkPresentation()
-checkContrast()
-checkLoginItem()
-checkEntryOrder()
-checkAppShortcuts()
-checkQuickAnswer()
-checkTextTransform()
-checkSnippetDraft()
-checkSnippetDictionary()
-checkSnippetSearch()
-checkAppFolderScan()
-checkShelfKeys()
-checkShelfFocus()
-checkSettingsPanes()
-checkSettingsSurface()
-checkSystemHotkeys()
-checkQuickOpen()
-checkShortcutInventory()
-checkCaptureShot()
-checkQuicklinkTags()
-checkErrorLog()
-checkClipJoin()
-checkCalcLine()
-checkAutoExpand()
-checkWelcome()
-checkScrollStitcher()
-checkEntryAliases()
-checkCaptureTextEntry()
-checkSystemPlace()
-checkCalculatorUpgrade()
-checkPastePlain()
-checkSeedsAreGeneric()
-checkModeTints()
-checkQuicklinkDraft()
-checkPredicateSafety()
-checkSpotlightHandover()
-checkTileGradient()
-
 func checkTextTransform() {
     section("文字の変換 — F6〜F10 と同じ5種類")
 
@@ -4142,10 +4066,10 @@ func checkSnippetDictionary() {
     // 🔴 日本語入力（IME）が入ったまま打った形でも引ける（2026-08-02 作者
     // 「mailzと入力してもtaro@example.comが表示されない」＝IMEの変換中文字列が来ていた）。
     // ローマ字IMEで m,a,i,l,z と打つと検索欄には「まいｌｚ」が入る
-    let mailz = Snippet(title: "mail_ゼロクラウド", keyword: "mailz", body: "j_ueda@example.jp")
+    let mailz = Snippet(title: "mail_サンプル", keyword: "mailz", body: "taro@example.jp")
     let withMailz = all + [mailz]
     expectEqual(SnippetDictionary.hits(for: "まいｌｚ", in: withMailz).map(\.title),
-                ["mail_ゼロクラウド"], "IME変換中の「まいｌｚ」で mailz が引ける")
+                ["mail_サンプル"], "IME変換中の「まいｌｚ」で mailz が引ける")
     expectEqual(SnippetDictionary.hits(for: "まいら", in: withMailz).count, 0,
                 "違う読み（まいら=maira）では引けない")
     expectEqual(SnippetDictionary.hits(for: "めーるず", in: withMailz).count, 0,
@@ -4345,7 +4269,7 @@ func checkSnippetSearch() {
     // 🔴 2026-08-02 作者「スニペット機能がうまく機能していない。」
     // 定型文の画面で読みがなを打つと、その定型文が**消えていた**。
     // 検索の当て先が題名だけで、読みがな（検索で当てるために作った欄）も本文も見ていなかった。
-    let mail = Snippet(title: "mail_ゼロクラウド", keyword: "mailz", body: "j_ueda@example.jp")
+    let mail = Snippet(title: "mail_サンプル", keyword: "mailz", body: "taro@example.jp")
     let sign = Snippet(title: "メール結び", keyword: "むすび", body: "よろしくお願いいたします。")
     let all = [mail, sign]
 
@@ -4356,16 +4280,16 @@ func checkSnippetSearch() {
             .map { $0.item.title }
     }
 
-    expectEqual(found("mailz"), ["mail_ゼロクラウド"], "読みがな（mailz）で見つかる")
+    expectEqual(found("mailz"), ["mail_サンプル"], "読みがな（mailz）で見つかる")
     expectEqual(found("むすび"), ["メール結び"], "かなの読みがなで見つかる")
-    expectEqual(found("j_ueda"), ["mail_ゼロクラウド"], "本文の中身でも見つかる")
-    expectEqual(found("ゼロクラウド"), ["mail_ゼロクラウド"], "題名でも今までどおり見つかる")
+    expectEqual(found("taro"), ["mail_サンプル"], "本文の中身でも見つかる")
+    expectEqual(found("サンプル"), ["mail_サンプル"], "題名でも今までどおり見つかる")
     expect(found("存在しない語").isEmpty, "関係ない語では出ない")
 
     // 当て先の中身そのもの
     let aliases = SnippetSearch.aliases(for: mail)
     expect(aliases.contains("mailz"), "読みがなが当て先に入る")
-    expect(aliases.contains { $0.contains("j_ueda") }, "本文が当て先に入る")
+    expect(aliases.contains { $0.contains("taro") }, "本文が当て先に入る")
     expect(SnippetSearch.aliases(for: Snippet(title: "空", keyword: "", body: "")).isEmpty,
            "読みがなも本文も無ければ当て先は空")
 
@@ -4375,7 +4299,7 @@ func checkSnippetSearch() {
     expect(SearchQuery.romajiAlternative(for: "") == nil, "空は言い換えない")
     expect(SearchQuery.romajiAlternative(for: "請求書") == nil, "漢字だけ（かな無し）は言い換えない")
     if let alternative = SearchQuery.romajiAlternative(for: "まいｌｚ") {
-        expectEqual(found(alternative), ["mail_ゼロクラウド"], "言い換えた形で定型文が見つかる")
+        expectEqual(found(alternative), ["mail_サンプル"], "言い換えた形で定型文が見つかる")
     } else {
         expect(false, "言い換えた形で定型文が見つかる")
     }
@@ -5325,17 +5249,83 @@ func checkShelfKeys() {
 
 
 print("")
-print(String(repeating: "─", count: 50))
-if failures.isEmpty {
-    print("全て通過: \(passed)件")
-    exit(0)
-} else {
-    print("通過 \(passed)件 / 失敗 \(failures.count)件")
-    for f in failures {
-        print("  - \(f)")
-    }
-    exit(1)
+// MARK: - 実行
+
+if CommandLine.arguments.contains("--diagnose") {
+    runDiagnosis()
 }
+
+print("テモト 動作確認")
+
+checkCoordinates()
+checkLayout()
+checkScreens()
+checkFuzzy()
+checkJapaneseReading()
+checkClipboardGuard()
+checkRetention()
+checkClipboardKinds()
+checkSnippets()
+checkCommands()
+
+do {
+    try checkVault()
+    try checkKeychain()
+    try checkStore()
+try checkStartupPhases()
+} catch {
+    print("  NG   検証中に例外: \(error)")
+    failures.append("検証中の例外: \(error)")
+}
+
+checkShortcuts()
+checkFeatureVisibility()
+checkAppVisibility()
+checkPanelBehavior()
+checkLauncherMode()
+checkFileQuery()
+checkCommandGrouping()
+checkMenuPlan()
+checkNotes()
+checkPresentation()
+checkContrast()
+checkLoginItem()
+checkEntryOrder()
+checkAppShortcuts()
+checkQuickAnswer()
+checkTextTransform()
+checkSnippetDraft()
+checkSnippetDictionary()
+checkSnippetSearch()
+checkAppFolderScan()
+checkShelfKeys()
+checkShelfFocus()
+checkSettingsPanes()
+checkSettingsSurface()
+checkSystemHotkeys()
+checkQuickOpen()
+checkShortcutInventory()
+checkCaptureShot()
+checkQuicklinkTags()
+checkErrorLog()
+checkClipJoin()
+checkCalcLine()
+checkAutoExpand()
+checkWelcome()
+checkScrollStitcher()
+checkEntryAliases()
+checkCaptureTextEntry()
+checkSystemPlace()
+checkCalculatorUpgrade()
+checkPastePlain()
+checkSeedsAreGeneric()
+checkModeTints()
+checkQuicklinkDraft()
+checkPredicateSafety()
+checkSpotlightHandover()
+checkTileGradient()
+
+
 
 
 // MARK: - 設定画面の横メニュー
@@ -5521,4 +5511,23 @@ func checkSystemHotkeys() {
     expectEqual(SystemHotkeys.parse(["1": ["enabled": 1]]).count, 1, "値が無くても行は作る")
     expect(SystemHotkeys.parse(["1": ["enabled": 1]]).first?.shortcut == nil,
            "値が無ければキーは nil（適当に埋めない）")
+}
+
+
+// MARK: - まとめ
+
+// ⚠️ ここがファイルの**いちばん下**にあること。
+// 前は途中に居て、`exit()` のあとにまだ関数定義が100行以上続いていた。
+// 動きはするが（Swift は前方参照が効く）、初めて開いた人には事故に見える。
+// 上から「道具 → 検査の定義 → 実行 → まとめ」の一本道にしてある。
+print(String(repeating: "─", count: 50))
+if failures.isEmpty {
+    print("全て通過: \(passed)件")
+    exit(0)
+} else {
+    print("通過 \(passed)件 / 失敗 \(failures.count)件")
+    for f in failures {
+        print("  - \(f)")
+    }
+    exit(1)
 }

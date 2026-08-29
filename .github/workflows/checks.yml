@@ -1,0 +1,35 @@
+# 他人が送ってきた変更でも、検証が全件通ることを機械が確かめる。
+#
+# ⚠️ README は「全件通過が .app 作成の条件」と書いているが、
+# それは作者の手元でしか回っていなかった。PR を受けたときに誰も回さないなら、
+# 書いてある条件は守られていないのと同じ。
+#
+# ⚠️ macos-14 ではなく macos-15 以降にする。Package.swift が
+# swift-tools-version: 6.0 なので、それより古いランナーではツールチェーンが足りない。
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift の版
+        run: swift --version
+
+      - name: 組み立て
+        run: swift build
+
+      # 本体。2,500件以上を数秒で回す
+      - name: 検証
+        run: swift run TemotoChecks
+
+      # ⚠️ 画面を組み立てる検査は、ここでは回さない。
+      # --check-settings-index / --check-settings-glyphs は AppKit の窓を作るので、
+      # 画面の無いランナーでは意味のある結果にならない（落ちるか、嘘の合格になる）。
+      # これらは手元の build-app.sh が毎回回している

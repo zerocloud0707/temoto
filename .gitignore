@@ -2,3 +2,11 @@
 .DS_Store
 *.dmg
 dist/
+
+# ⚠️ `.claude/` が最重要。publish-sync.sh は rsync の --exclude で外しているが、
+# --exclude は --delete からも守ってしまう。一度こちら側にできると
+# rsync では消えず、git 側で無視していないと次の `git add -A` で拾ってしまう
+.claude/
+.swiftpm/
+*.xcuserdatad
+*.app/
