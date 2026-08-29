@@ -979,6 +979,27 @@ final class ChipPopUpButton: NSPopUpButton {
 /// 選ぶのはマウスの仕事、キーは検索欄と編集エリアの仕事、と分ける。
 final class NonFocusingTableView: NSTableView {
     override var acceptsFirstResponder: Bool { false }
+
+    /// 右クリックしたときに出す品書きを作る係（行番号を渡す。-1 は行の外）。
+    ///
+    /// ⚠️ これが要る理由（2026-08-30 作者「コピー履歴で見られたくないものがあります。
+    /// 削除できる様にして欲しい」）。1件消す ⌘⌫ は前からあり、下の帯にも
+    /// 「⌘⌫ 削除」と出していた。それでも伝わらなかった。
+    /// **キーは覚えた人にしか使えない**。右クリックなら覚えなくてよい。
+    /// 2026-07-30 にも同じこと（「削除や編集できる様にして」＝実は在った）が起きている。
+    /// 2度あったのだから、帯に書き足すのではなく**別の入口**を作る。
+    var contextMenuProvider: ((Int) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        // ⚠️ 右クリックした行が選ばれていなければ、先に選ぶ。
+        // 選ばずに品書きだけ出すと、「どれに効くのか」が分からない
+        if row >= 0, !selectedRowIndexes.contains(row) {
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        return contextMenuProvider?(row)
+    }
 }
 
 // MARK: - 見出し

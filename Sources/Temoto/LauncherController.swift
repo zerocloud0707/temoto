@@ -324,6 +324,8 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         tableView.intercellSpacing = NSSize(width: 0, height: 2)
         tableView.dataSource = self
         tableView.delegate = self
+        // 右クリックの品書き。キーを覚えていなくても、消す・コピーする道がある状態にする
+        tableView.contextMenuProvider = { [weak self] row in self?.contextMenu(forRow: row) }
         tableView.target = self
         tableView.doubleAction = #selector(rowDoubleClicked)
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("main"))
@@ -398,7 +400,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
             } else if let item = selectedItem, case .quicklink(let link) = item.kind {
                 deleteQuicklink(link)
             } else {
-                deleteSelectedClip()
+                deleteSelectedClips()
             }
         case "⌘⏎":
             guard let item = selectedItem, case .file(let hit) = item.kind else { return }
@@ -2150,7 +2152,7 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
             } else if let item = selectedItem, case .quicklink(let link) = item.kind {
                 deleteQuicklink(link)
             } else {
-                deleteSelectedClip()
+                deleteSelectedClips()
             }
             return true
         }
@@ -2244,6 +2246,65 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         let row = tableView.selectedRow
         guard row >= 0, row < results.count else { return nil }
         return results[row].item
+    }
+
+    /// 右クリックしたときの品書き。
+    ///
+    /// ⚠️ キーの割り当てと**同じことしか出さない**。ここにしか無い操作を作ると、
+    /// 「右クリックしないとできないこと」が生まれて、キーで使う人が損をする。
+    /// 逆に、キーを覚えていない人はここだけで一通りできる。
+    private func contextMenu(forRow row: Int) -> NSMenu? {
+        guard row >= 0, row < results.count else { return nil }
+        let kind = results[row].item.kind
+        let menu = NSMenu()
+
+        func add(_ title: String, _ keys: String, _ action: @escaping () -> Void) {
+            let item = NSMenuItem(title: title, action: #selector(runMenuAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = MenuAction(run: action)
+            // ⚠️ キーは「押せる印」ではなく**覚書き**として題名に混ぜる。
+            // keyEquivalent に入れると品書きが閉じたあとも効いてしまい、二重に登録されたのと同じになる
+            item.title = "\(title)　\(keys)"
+            menu.addItem(item)
+        }
+
+        switch kind {
+        case .clip(let clip):
+            let count = tableView.selectedRowIndexes.count
+            add(count > 1 ? "\(count)件を貼り付け" : "貼り付け", "⏎") { [weak self] in self?.activateSelection() }
+            add("コピー", "⌘C") { [weak self] in self?.copySelectionOnly() }
+            add(clip.pinned ? "ピン留めを外す" : "ピン留め", "⌘P") { [weak self] in self?.togglePinOnSelection() }
+            menu.addItem(.separator())
+            add(count > 1 ? "\(count)件を削除" : "削除", "⌘⌫") { [weak self] in self?.deleteSelectedClips() }
+
+        case .snippet(let snippet):
+            add("貼り付け", "⏎") { [weak self] in self?.activateSelection() }
+            add("編集", "⌘E") { [weak self] in self?.editSnippet(snippet) }
+            menu.addItem(.separator())
+            add("削除", "⌘⌫") { [weak self] in self?.deleteSnippet(snippet) }
+
+        case .quicklink(let link):
+            add("開く", "⏎") { [weak self] in self?.activateSelection() }
+            add("編集", "⌘E") { [weak self] in self?.editQuicklink(link) }
+            menu.addItem(.separator())
+            add("削除", "⌘⌫") { [weak self] in self?.deleteQuicklink(link) }
+
+        case .savedSearch(let saved):
+            add("この条件で探す", "⏎") { [weak self] in self?.activateSelection() }
+            add("編集", "⌘E") { [weak self] in self?.editSelectedSavedSearch(saved) }
+            menu.addItem(.separator())
+            add("削除", "⌘⌫") { [weak self] in self?.deleteSelectedSavedSearch(saved) }
+
+        default:
+            // 消したり直したりできない行（アプリ・コマンド・ファイル）には品書きを出さない。
+            // 「実行」しか無い品書きは、出す意味より「押したのに何も無い」の方が大きい
+            return nil
+        }
+        return menu
+    }
+
+    @objc private func runMenuAction(_ sender: NSMenuItem) {
+        (sender.representedObject as? MenuAction)?.run()
     }
 
     private func activateSelection() {
@@ -2541,23 +2602,52 @@ final class LauncherController: NSObject, NSTableViewDataSource, NSTableViewDele
         Toast.show(pinned ? "ピン留めしました" : "ピン留めを外しました")
     }
 
-    private func deleteSelectedClip() {
-        guard let item = selectedItem, case .clip(let clip) = item.kind,
-              let index = store.clips.firstIndex(where: { $0.id == clip.id }) else { return }
-        let row = tableView.selectedRow
-        store.clips.remove(at: index)
+    /// いま選んでいる履歴を消す。
+    ///
+    /// ⚠️ 複数選んでいたら**全部**消す。
+    /// 前は1件だけだった。⇧↑↓ で3件選んで ⌘⌫ を押すと1件しか消えず、
+    /// 残った2件が「消したはずなのに残っている」ように見える
+    /// （見られたくないものを消す場面では、これは危ない外れ方）。
+    ///
+    /// ⚠️ 2件以上のときだけ一度きく。1件は迷わず消す（消したい場面で確認は邪魔）。
+    /// まとめて消すのは取り返しがつかないので、そこだけ足を止める。
+    private func deleteSelectedClips() {
+        let rows = tableView.selectedRowIndexes.sorted()
+        let clips: [ClipItem] = rows.compactMap { row in
+            guard row < results.count, case .clip(let clip) = results[row].item.kind else { return nil }
+            return clip
+        }
+        guard !clips.isEmpty else { return }
+
+        if clips.count > 1 {
+            let alert = NSAlert()
+            alert.messageText = "\(clips.count)件を消しますか？"
+            alert.informativeText = "元には戻せません。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "消す")
+            alert.addButton(withTitle: "やめる")
+            NSApp.activate()
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        let doomed = Set(clips.map(\.id))
+        let firstRow = rows.first ?? tableView.selectedRow
+        store.clips.removeAll { doomed.contains($0.id) }
         store.saveClips()
-        // 絵は履歴とは別ファイルなので、行を消しただけでは残ってしまう
-        if clip.kind == .image {
+        // ⚠️ 絵は履歴とは別ファイル。行を消しただけではディスクに残る。
+        // 「見られたくないものを消した」つもりで残っているのが、いちばんまずい消え残り
+        for clip in clips where clip.kind == .image {
             store.deleteClipImage(id: clip.id)
             ClipThumbnailCache.forget(clip.id)
             PreviewImageCache.forget(clip.id)
         }
         reload()
         if !results.isEmpty {
-            let next = min(max(row, 0), results.count - 1)
+            let next = min(max(firstRow, 0), results.count - 1)
             tableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
         }
+        Toast.show(clips.count == 1 ? "1件を消しました" : "\(clips.count)件を消しました",
+                   area: "コピー履歴")
     }
 }
 
@@ -2606,4 +2696,13 @@ final class SnippetFieldChain: NSObject, NSTextFieldDelegate {
         control.window?.makeFirstResponder(target)
         return true
     }
+}
+
+
+/// 品書きの1行が持つ「押したら何をするか」。
+/// ⚠️ NSMenuItem の representedObject は Any なので、閉包をそのまま入れられない。
+/// 小さな入れ物に包んで持たせる
+private final class MenuAction {
+    let run: () -> Void
+    init(run: @escaping () -> Void) { self.run = run }
 }
