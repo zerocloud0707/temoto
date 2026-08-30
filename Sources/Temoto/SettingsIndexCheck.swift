@@ -120,7 +120,13 @@ enum SettingsIndexCheck {
     /// 画面に出ている文字を集める。
     /// ⚠️ ボタンの題と札の両方を見る。片方だけだと、ボタンで書かれた設定を見落とす
     private static func collect(_ view: NSView, into found: inout [String]) {
-        if let field = view as? NSTextField { found.append(field.stringValue) }
+        if let field = view as? NSTextField {
+            found.append(field.stringValue)
+            // ⚠️ 薄く出ている案内（プレースホルダ）も**目に見える文字**。
+            // 集め忘れると、検索欄そのものを探せる設定として登録できない
+            // （2026-08-30、実際に「キーや名前で探す」が見つからず落ちた）
+            if let hint = field.placeholderString { found.append(hint) }
+        }
         if let button = view as? NSButton { found.append(button.title) }
         view.subviews.forEach { collect($0, into: &found) }
     }

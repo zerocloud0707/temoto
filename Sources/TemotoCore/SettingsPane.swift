@@ -202,8 +202,10 @@ public enum SettingsSearch {
         // ── キーのかぶり
         SettingsItem(pane: .hotkeys, title: "macOS が使っているキー",
                      keywords: ["システム", "重複", "かぶり", "衝突", "効かない", "spotlight", "使えない"]),
-        SettingsItem(pane: .hotkeys, title: "テモトが使っているキー",
-                     keywords: ["一覧", "割り当て", "重複", "かぶり", "hotkey"]),
+        SettingsItem(pane: .hotkeys, title: "キーや名前で探す（例: ⌃⌥V／ctrl／コピー）",
+                     keywords: ["検索", "探す", "一覧", "割り当て", "重複", "かぶり", "hotkey"]),
+        SettingsItem(pane: .hotkeys, title: "テモト｜開くもの",
+                     keywords: ["変更", "割り当て直す", "キーを変える", "ショートカット設定"]),
 
         SettingsItem(pane: .fileSearch, title: "出す件数",
                      keywords: ["上限", "多すぎる", "絞る", "何件"]),

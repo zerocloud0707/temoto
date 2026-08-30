@@ -5303,6 +5303,7 @@ checkShelfFocus()
 checkSettingsPanes()
 checkSettingsSurface()
 checkSystemHotkeys()
+checkShortcutSlots()
 checkQuickOpen()
 checkShortcutInventory()
 checkCaptureShot()
@@ -5511,6 +5512,81 @@ func checkSystemHotkeys() {
     expectEqual(SystemHotkeys.parse(["1": ["enabled": 1]]).count, 1, "値が無くても行は作る")
     expect(SystemHotkeys.parse(["1": ["enabled": 1]]).first?.shortcut == nil,
            "値が無ければキーは nil（適当に埋めない）")
+}
+
+
+// MARK: - 割り当ての場所（ShortcutSlot）
+
+func checkShortcutSlots() {
+    section("割り当ての場所と、その検索")
+
+    var settings = Settings()
+
+    // ── 一覧と読み書きが**同じ場所から**引けているか
+    // ⚠️ これが今回の作り直しの目的。2度あった「一覧への足し忘れ」を作りから消す
+    let slots = settings.allSlots
+    expect(!slots.isEmpty, "割り当てられる場所がある")
+    expect(Set(slots.map(\.slot)).count == slots.count, "同じ場所が二重に出てこない")
+    for entry in slots {
+        expect(!entry.name.isEmpty, "「\(entry.slot)」に名前がある")
+    }
+
+    // 一覧は場所から引いたものと必ず一致する（別々に並べない）
+    let derived = slots.compactMap { entry -> String? in
+        settings.shortcut(for: entry.slot) == nil ? nil : entry.name
+    }
+    expectEqual(settings.allShortcuts.map(\.name), derived,
+                "重複チェックの一覧は、場所の一覧から引いている（手で並べ直していない）")
+
+    // ── 読み書き
+    let newKey = Shortcut(keyCode: 40, carbonModifiers: Shortcut.controlBit | Shortcut.cmdBit, keyLabel: "K")
+    settings.setShortcut(newKey, for: .launcher)
+    expectEqual(settings.shortcut(for: .launcher), newKey, "書いたものが読める")
+    expectEqual(settings.launcherShortcut, newKey, "元の入れ物にも入る（画面と保存で食い違わない）")
+
+    // ⚠️ 入口の4つは空にできない。空にできると二度と開けなくなる
+    settings.setShortcut(nil, for: .launcher)
+    expectEqual(settings.shortcut(for: .launcher), newKey, "検索を開くキーは空にできない（開く手段が消える）")
+    expect(!ShortcutSlot.launcher.allowsEmpty, "検索を開くは空を許さない")
+    expect(!ShortcutSlot.clipboard.allowsEmpty, "コピー履歴も空を許さない")
+    expect(ShortcutSlot.pastePlain.allowsEmpty, "書式なし貼り付けは空でよい")
+
+    // 空にできる場所は、ちゃんと空になる
+    settings.setShortcut(newKey, for: .pastePlain)
+    expectEqual(settings.shortcut(for: .pastePlain), newKey, "書式なし貼り付けに入る")
+    settings.setShortcut(nil, for: .pastePlain)
+    expect(settings.shortcut(for: .pastePlain) == nil, "空にできる")
+
+    // 束ねで持っているもの（ウィンドウ・変換）も同じ口で読み書きできる
+    let layoutKey = Shortcut(keyCode: 4, carbonModifiers: Shortcut.optionBit, keyLabel: "H")
+    settings.setShortcut(layoutKey, for: .window(.leftHalf))
+    expectEqual(settings.shortcut(for: .window(.leftHalf)), layoutKey, "ウィンドウの割り当ても同じ口で書ける")
+    expectEqual(settings.windowBindings.filter { $0.layout == .leftHalf }.count, 1,
+                "同じレイアウトが2行にならない（2行あると先に登録した方だけが効く）")
+
+    // ── 探す
+    let vKey = Shortcut(keyCode: 9, carbonModifiers: Shortcut.controlBit | Shortcut.optionBit, keyLabel: "V")
+    expect(ShortcutSearch.matches(query: "", name: "コピー履歴", shortcut: vKey), "空なら全部出す")
+    expect(ShortcutSearch.matches(query: "コピー", name: "コピー履歴", shortcut: vKey), "名前で当たる")
+    // ⚠️ **キーそのもの**で探せることが肝。「⌃⌥V は何に使っている？」が本来の使い道
+    expect(ShortcutSearch.matches(query: "⌃⌥V", name: "コピー履歴", shortcut: vKey), "キーの記号で当たる")
+    expect(ShortcutSearch.matches(query: "V", name: "コピー履歴", shortcut: vKey), "キーの文字だけでも当たる")
+    // 記号は打ちにくいので英字でも当たる
+    expect(ShortcutSearch.matches(query: "ctrl", name: "コピー履歴", shortcut: vKey), "ctrl でも当たる")
+    expect(ShortcutSearch.matches(query: "option", name: "コピー履歴", shortcut: vKey), "option でも当たる")
+    expect(ShortcutSearch.matches(query: "CMD", name: "何か",
+                                  shortcut: Shortcut(keyCode: 9, carbonModifiers: Shortcut.cmdBit, keyLabel: "V")),
+           "大文字でも当たる")
+    expect(!ShortcutSearch.matches(query: "cmd", name: "コピー履歴", shortcut: vKey),
+           "使っていない修飾キーでは当たらない")
+    expect(!ShortcutSearch.matches(query: "ぬるぽ", name: "コピー履歴", shortcut: vKey), "当たらない語では出ない")
+    expect(ShortcutSearch.matches(query: "コピー ctrl", name: "コピー履歴", shortcut: vKey),
+           "2語はどちらも満たすものだけ（絞り込みになる）")
+    expect(!ShortcutSearch.matches(query: "コピー cmd", name: "コピー履歴", shortcut: vKey),
+           "片方でも外れたら出さない")
+    // 割り当てが無いものも探せる
+    expect(ShortcutSearch.matches(query: "割り当てなし", name: "書式なしで貼り付け", shortcut: nil),
+           "まだ決めていないものを「割り当てなし」で集められる")
 }
 
 

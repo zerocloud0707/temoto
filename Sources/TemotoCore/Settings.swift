@@ -494,27 +494,17 @@ public struct Settings: Codable, Equatable, Sendable {
 
     /// 今割り当てている全ショートカットを「名前つき」で返す。
     /// 設定画面の重複チェックと、登録の失敗を人に説明するために使う。
+    ///
+    /// ⚠️ 2026-08-30、ここは `allSlots` から**引くだけ**になった。
+    /// それまでは同じ並びを手で書いており、割り当てを増やすたびに
+    /// 足し忘れる事故が起きていた（2度）。
+    /// すぐ上に「混ぜ忘れると黙って効かない」と自分で書いてあってもなお忘れたので、
+    /// 忘れられる形そのものをやめた。増やすときに触るのは `allSlots` の1か所だけ。
     public var allShortcuts: [(name: String, shortcut: Shortcut)] {
-        var list: [(String, Shortcut)] = [
-            ("検索を開く", launcherShortcut),
-            ("コピー履歴", clipboardShortcut),
-            ("定型文", snippetShortcut),
-            ("メモ", noteShortcut),
-        ]
-        list += windowBindings.map { ($0.layout.title, $0.shortcut) }
-        list += displayBindings.map { ($0.step > 0 ? "次の画面へ移す" : "前の画面へ移す", $0.shortcut) }
-        // ⚠️ アプリのキーもここに必ず混ぜる。
-        // 混ぜ忘れると、⌃⌥S を定型文とアプリの両方に割り当てても設定画面は何も言わず、
-        // 後から登録した方だけが黙って効かない（原因の分からない「効かないキー」になる）。
-        list += appBindings.map { ($0.name, $0.shortcut) }
-        // ⚠️ 「既定は未割り当て」のキーも必ず混ぜる。
-        // 2026-08-05 に見つけた漏れ: 書式なし貼り付け・文字の変換・画面の文字読み取りが
-        // この一覧に入っておらず、同じキーを別の機能と重ねても設定画面が何も言わなかった。
-        // すぐ上に「混ぜ忘れると黙って効かない」と自分で書いてあるのに、増やすときに忘れていた。
-        list += convertBindings.map { ($0.transform.title + "に変換", $0.shortcut) }
-        if let pastePlainShortcut { list.append(("書式なしで貼り付け", pastePlainShortcut)) }
-        if let captureTextShortcut { list.append(("画面の文字を読み取る", captureTextShortcut)) }
-        return list.map { (name: $0.0, shortcut: $0.1) }
+        allSlots.compactMap { entry in
+            guard let shortcut = shortcut(for: entry.slot) else { return nil }
+            return (name: entry.name, shortcut: shortcut)
+        }
     }
 
     // MARK: - アプリのキー

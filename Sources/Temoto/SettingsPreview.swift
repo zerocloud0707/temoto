@@ -52,6 +52,10 @@ enum SettingsPreview {
         NSApp.windows.first(where: { $0 is SettingsWindow })?.makeKeyAndOrderFront(nil)
         // 前面になるのを待つ（すぐ撮ると、まだ控えめな選択のまま）
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        if let index = CommandLine.arguments.firstIndex(of: "--key-query"),
+           index + 1 < CommandLine.arguments.count {
+            controller.previewHotkeySearch(CommandLine.arguments[index + 1])
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--query"),
            index + 1 < CommandLine.arguments.count {
             controller.previewSearch(CommandLine.arguments[index + 1])
